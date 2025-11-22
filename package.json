@@ -1,0 +1,35 @@
+{
+  "name": "pbtsdb",
+  "version": "1.0.0",
+  "description": "",
+  "license": "ISC",
+  "author": "",
+  "type": "commonjs",
+  "main": "index.js",
+  "scripts": {
+    "checks": "run-p typecheck lint",
+    "lint": "biome check .",
+    "lint:fix": "biome check . --write",
+    "typecheck": "tsc  --noEmit --skipLibCheck",
+    "test": "vitest"
+  },
+  "dependencies": {
+    "@tanstack/query-db-collection": "^1.0.4",
+    "@tanstack/react-db": "^0.1.49",
+    "@tanstack/react-query": "^5.90.10",
+    "biome": "^0.3.3",
+    "pocketbase": "^0.26.3",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3"
+  },
+  "devDependencies": {
+    "@testing-library/react": "^16.3.0",
+    "@types/node": "^24.10.1",
+    "dotenv": "^17.2.3",
+    "jsdom": "^27.2.0",
+    "npm-run-all": "^4.1.5",
+    "vitest": "^4.0.13"
+  }
+}

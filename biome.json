@@ -1,0 +1,84 @@
+{
+    "$schema": "https://biomejs.dev/schemas/2.3.5/schema.json",
+    "vcs": {
+        "enabled": true,
+        "clientKind": "git",
+        "useIgnoreFile": true
+    },
+    "files": {
+        "ignoreUnknown": false,
+        "includes": [
+            "**/*.ts",
+            "**/*.tsx",
+            "**/*.js",
+            "**/*.jsx",
+            "**/*.json",
+            "!pb_hooks/**/*",
+            "!server/pb_hooks/**/*",
+            "!server/pb_data/**/*",
+            "!types/**/*",
+            "!pb_migrations/**/*",
+            "!server/pb_migrations/**/*",
+            "!.expo/**/*",
+            "!!**/pb_hooks/**/*",
+            "!!**/server/pb_hooks/**/*",
+            "!!**/server/pb_data/**/*",
+            "!!**/pb_migrations/**/*",
+            "!!**/server/pb_migrations/**/*",
+            "!!**/docker/**/*"
+        ]
+    },
+    "formatter": {
+        "enabled": true,
+        "indentStyle": "space",
+        "indentWidth": 4,
+        "lineWidth": 100
+    },
+    "linter": {
+        "enabled": true,
+        "rules": {
+            "recommended": true,
+            "style": {
+                "useConst": "error",
+                "useTemplate": "error",
+                "useShorthandFunctionType": "error",
+                "useConsistentArrayType": {
+                    "level": "error",
+                    "options": {
+                        "syntax": "shorthand"
+                    }
+                }
+            },
+            "correctness": {
+                "useExhaustiveDependencies": "warn",
+                "useHookAtTopLevel": "error"
+            },
+            "suspicious": {
+                "noDebugger": "error",
+                "noConsole": "warn",
+                "noVar": "error",
+                "noExplicitAny": "error"
+            },
+            "complexity": {
+                "noExcessiveCognitiveComplexity": "warn"
+            }
+        }
+    },
+    "javascript": {
+        "formatter": {
+            "quoteStyle": "single",
+            "quoteProperties": "asNeeded",
+            "trailingCommas": "es5",
+            "semicolons": "asNeeded",
+            "arrowParentheses": "asNeeded"
+        }
+    },
+    "assist": {
+        "enabled": true,
+        "actions": {
+            "source": {
+                "organizeImports": "on"
+            }
+        }
+    }
+}

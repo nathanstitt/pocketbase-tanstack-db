@@ -176,6 +176,7 @@ export class CollectionFactory<Schema extends SchemaDeclaration, TMaxDepth exten
                 },
                 queryClient: this.queryClient,
                 getKey: (item: RecordType) => (item as { id: string }).id,
+                startSync: options?.startSync ?? false,
             })
         );
 

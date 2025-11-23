@@ -311,4 +311,23 @@ export interface CreateCollectionOptions<
      * ```
      */
     expand?: Expand;
+
+    /**
+     * Whether to automatically sync (fetch) data when the collection is created.
+     * Default: false (lazy - sync starts after first query becomes active).
+     *
+     * @example
+     * ```ts
+     * // Lazy loading (default) - sync starts after query
+     * const jobsCollection = factory.create('jobs');
+     * // or explicitly:
+     * const jobsCollection = factory.create('jobs', { startSync: false });
+     *
+     * // Eager loading - sync starts immediately on creation
+     * const jobsCollection = factory.create('jobs', {
+     *     startSync: true
+     * });
+     * ```
+     */
+    startSync?: boolean;
 }

@@ -2,6 +2,7 @@ import { renderHook, waitFor } from '@testing-library/react'
 import { useLiveQuery } from '@tanstack/react-db'
 import { eq } from '@tanstack/db'
 import { afterAll, beforeAll, beforeEach, afterEach, describe, expect, it } from 'vitest'
+import { useState } from 'react'
 
 import type { QueryClient } from '@tanstack/react-query'
 
@@ -520,4 +521,97 @@ describe('Collection - Real-time Subscriptions', () => {
             // Ignore cleanup errors
         }
     }, 20000)
+
+    it('should not subscribe when liveQuery returns null (conditional queries)', async () => {
+        const factory = createCollectionFactory(queryClient)
+        const booksCollection = factory.create('books')
+
+        // Use a hook that conditionally returns null
+        const { result, rerender, unmount } = renderHook(({ enabled }: { enabled: boolean }) =>
+            useLiveQuery((q) => {
+                if (!enabled) return null
+                return q.from({ books: booksCollection })
+            }),
+            { initialProps: { enabled: false } }
+        )
+
+        // Wait a bit to ensure no subscription is started
+        await new Promise(resolve => setTimeout(resolve, 500))
+
+        // Should NOT be subscribed when query returns null
+        expect(booksCollection.isSubscribed()).toBe(false)
+        expect(result.current.data).toBeUndefined()
+
+        // Enable the query by rerendering with enabled: true
+        rerender({ enabled: true })
+
+        // Wait for query to load
+        await waitFor(
+            () => {
+                expect(result.current.isLoading).toBe(false)
+            },
+            { timeout: 5000 }
+        )
+
+        // Give subscription time to establish (async)
+        await new Promise(resolve => setTimeout(resolve, 500))
+
+        // NOW should be subscribed
+        expect(booksCollection.isSubscribed()).toBe(true)
+        expect(result.current.data).toBeDefined()
+        expect(Array.isArray(result.current.data)).toBe(true)
+
+        // Unmount to trigger cleanup
+        unmount()
+
+        // Wait for cleanup delay (5s) plus buffer
+        await new Promise(resolve => setTimeout(resolve, 6000))
+
+        // Should unsubscribe after unmount cleanup delay
+        expect(booksCollection.isSubscribed()).toBe(false)
+    }, 20000)
+
+    it('should respect startSync: true option (eager sync)', async () => {
+        const factory = createCollectionFactory(queryClient)
+
+        // Create collection with startSync: true for eager sync
+        const booksCollection = factory.create('books', {
+            startSync: true
+        })
+
+        // Give it a moment for eager sync to trigger
+        await new Promise(resolve => setTimeout(resolve, 500))
+
+        // With startSync: true, subscription should start automatically
+        // Note: Subscription might not be established yet, but sync should have started
+        // Let's verify by checking if a query immediately has data without waiting
+
+        const { result, unmount } = renderHook(() =>
+            useLiveQuery((q) => q.from({ books: booksCollection }))
+        )
+
+        // With eager sync, data should load quickly (already syncing)
+        await waitFor(
+            () => {
+                expect(result.current.isLoading).toBe(false)
+            },
+            { timeout: 3000 }  // Shorter timeout since sync already started
+        )
+
+        // Data should be available
+        expect(result.current.data).toBeDefined()
+        expect(Array.isArray(result.current.data)).toBe(true)
+        expect(result.current.data.length).toBeGreaterThan(0)
+
+        // Give subscription time to establish
+        await new Promise(resolve => setTimeout(resolve, 500))
+
+        // Should be subscribed
+        expect(booksCollection.isSubscribed()).toBe(true)
+
+        // Cleanup
+        unmount()
+        await new Promise(resolve => setTimeout(resolve, 6000))
+        expect(booksCollection.isSubscribed()).toBe(false)
+    }, 15000)
 })

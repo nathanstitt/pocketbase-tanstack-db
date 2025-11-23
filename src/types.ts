@@ -283,26 +283,6 @@ export interface CreateCollectionOptions<
      * ```
      */
     expand?: Expand;
-
-    /**
-     * Enable automatic real-time subscriptions.
-     * When true (default), the collection automatically subscribes to PocketBase real-time updates.
-     * When false, you can manually control subscriptions using subscribe()/unsubscribe() methods.
-     *
-     * @default true
-     *
-     * @example
-     * ```ts
-     * // Disable auto-subscription
-     * const jobsCollection = factory.create('jobs', {
-     *     enableSubscriptions: false
-     * });
-     *
-     * // Manually subscribe when needed
-     * await jobsCollection.subscribe();
-     * ```
-     */
-    enableSubscriptions?: boolean;
 }
 
 /**
@@ -321,4 +301,7 @@ export const SUBSCRIPTION_CONFIG = {
 
     /** Default timeout in milliseconds for waitForSubscription */
     DEFAULT_WAIT_TIMEOUT_MS: 5000,
+
+    /** Delay in milliseconds before unsubscribing after last query unmounts (prevents thrashing) */
+    CLEANUP_DELAY_MS: 5000,
 } as const;

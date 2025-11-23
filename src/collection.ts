@@ -58,48 +58,23 @@ export class CollectionFactory<Schema extends SchemaDeclaration, TMaxDepth exten
     /**
      * Create a TanStack DB collection from a PocketBase collection.
      *
+     * Collections are lazy by default - they don't fetch data or subscribe until queried.
+     * Real-time subscriptions automatically start when the first query becomes active
+     * and stop when the last query unmounts (with a cleanup delay to prevent thrashing).
+     *
      * @param collection - The name of the collection
      * @param options - Optional configuration including relations and expand
      *
      * @example
-     * Basic usage with automatic real-time subscription:
-     * ```ts
-     * const jobsCollection = factory.create('jobs');
-     * // Automatically subscribed to all changes
-     * ```
-     *
-     * @example
-     * Manual subscription control:
+     * Basic usage with automatic lifecycle management:
      * ```ts
      * const jobsCollection = factory.create('jobs');
      *
-     * // Subscribe to specific record
-     * jobsCollection.subscribe('record_id_123');
-     *
-     * // Unsubscribe from specific record
-     * jobsCollection.unsubscribe('record_id_123');
-     *
-     * // Unsubscribe from all
-     * jobsCollection.unsubscribeAll();
-     *
-     * // Check subscription status
-     * const isSubbed = jobsCollection.isSubscribed(); // collection-wide
-     * const isSubbed2 = jobsCollection.isSubscribed('record_id_123'); // specific record
-     * ```
-     *
-     * @example
-     * Opt-out of automatic subscriptions:
-     * ```ts
-     * // Disable auto-subscription for better control
-     * const jobsCollection = factory.create('jobs', {
-     *     enableSubscriptions: false
-     * });
-     *
-     * // Later, manually subscribe when needed
-     * jobsCollection.subscribe(); // Subscribe to all changes
-     *
-     * // Or subscribe to specific record
-     * jobsCollection.subscribe('record_id_123');
+     * // In your component - subscription starts automatically
+     * const { data } = useLiveQuery((q) =>
+     *     q.from({ jobs: jobsCollection })
+     * );
+     * // Subscription stops automatically when component unmounts
      * ```
      *
      * @example
@@ -152,6 +127,21 @@ export class CollectionFactory<Schema extends SchemaDeclaration, TMaxDepth exten
      *      }))
      * );
      * ```
+     *
+     * @example
+     * Manual subscription control (advanced):
+     * ```ts
+     * const jobsCollection = factory.create('jobs');
+     *
+     * // Manually subscribe to specific record (bypasses automatic lifecycle)
+     * await jobsCollection.subscribe('record_id_123');
+     *
+     * // Check subscription status
+     * const isSubbed = jobsCollection.isSubscribed('record_id_123');
+     *
+     * // Manually unsubscribe
+     * jobsCollection.unsubscribe('record_id_123');
+     * ```
      */
     create<
         C extends keyof Schema & string,
@@ -203,15 +193,24 @@ export class CollectionFactory<Schema extends SchemaDeclaration, TMaxDepth exten
             relations: options?.relations || {} as RelationsConfig<Schema, C>
         });
 
-        // Automatically subscribe to collection-wide updates on creation (if enabled)
-        // Note: This runs asynchronously in the background - the collection is usable immediately
-        const enableSubscriptions = options?.enableSubscriptions !== false; // Default to true
-        if (enableSubscriptions) {
-            // Fire and forget - subscription establishes in background
-            this.subscriptionManager.subscribe(collection, baseCollection).catch(() => {
-                // Silently handle subscription errors - reconnection will be attempted
-            });
-        }
+        // Hook into TanStack DB's subscriber lifecycle events
+        // Subscribe when first query becomes active, unsubscribe when last query unmounts
+        baseCollection.on('subscribers:change', (event) => {
+            const newCount = event.subscriberCount;
+            const previousCount = event.previousSubscriberCount;
+
+            // Subscriber added
+            if (newCount > previousCount) {
+                // Fire and forget - subscription handled asynchronously
+                this.subscriptionManager.addSubscriber(collection, baseCollection).catch(() => {
+                    // Silently handle subscription errors - reconnection will be attempted
+                });
+            }
+            // Subscriber removed
+            else if (newCount < previousCount) {
+                this.subscriptionManager.removeSubscriber(collection);
+            }
+        });
 
         return subscribableCollection as Collection<RecordType> & SubscribableCollection<RecordType> & JoinHelper<Schema, C, RecordType>;
     }

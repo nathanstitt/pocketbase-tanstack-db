@@ -27,10 +27,30 @@ describe('Collection - Real-time Subscriptions', () => {
         queryClient.clear()
     })
 
-    it('should automatically subscribe to collection on creation', async () => {
-        const booksCollection = createBooksCollection(queryClient)
+    it('should not subscribe until first query is active', async () => {
+        const factory = createCollectionFactory(queryClient)
+        const booksCollection = factory.create('books')
 
-        // Check that collection is subscribed (synchronously tracked)
+        // Collections are lazy - no subscription on creation
+        expect(booksCollection.isSubscribed()).toBe(false)
+
+        // Set up a query to trigger subscription
+        const { result } = renderHook(() =>
+            useLiveQuery((q) => q.from({ books: booksCollection }))
+        )
+
+        // Wait for query to load
+        await waitFor(
+            () => {
+                expect(result.current.isLoading).toBe(false)
+            },
+            { timeout: 5000 }
+        )
+
+        // Give subscription time to establish (async)
+        await new Promise(resolve => setTimeout(resolve, 500))
+
+        // Now should be subscribed
         expect(booksCollection.isSubscribed()).toBe(true)
     })
 
@@ -254,16 +274,19 @@ describe('Collection - Real-time Subscriptions', () => {
         }
     }, 15000)
 
-    it('should support unsubscribe functionality', async () => {
-        const booksCollection = createBooksCollection(queryClient)
+    it('should support manual subscribe/unsubscribe functionality', async () => {
+        const factory = createCollectionFactory(queryClient)
+        const booksCollection = factory.create('books')
 
-        // Initially subscribed
+        // Initially NOT subscribed (lazy)
+        expect(booksCollection.isSubscribed()).toBe(false)
+
+        // Manually subscribe
+        await booksCollection.subscribe()
         expect(booksCollection.isSubscribed()).toBe(true)
 
-        // Unsubscribe from collection-wide
+        // Unsubscribe
         booksCollection.unsubscribe()
-
-        // Check it's unsubscribed
         expect(booksCollection.isSubscribed()).toBe(false)
 
         // Re-subscribe
@@ -275,7 +298,8 @@ describe('Collection - Real-time Subscriptions', () => {
     })
 
     it('should unsubscribe from all subscriptions', async () => {
-        const booksCollection = createBooksCollection(queryClient)
+        const factory = createCollectionFactory(queryClient)
+        const booksCollection = factory.create('books')
 
         // Create test books
         const authorId = await getTestAuthorId()
@@ -294,11 +318,10 @@ describe('Collection - Real-time Subscriptions', () => {
             author: authorId
         })
 
-        // Subscribe to specific records
+        // Manually subscribe to specific records
         await booksCollection.subscribe(book1.id)
         await booksCollection.subscribe(book2.id)
 
-        expect(booksCollection.isSubscribed()).toBe(true) // collection-wide
         expect(booksCollection.isSubscribed(book1.id)).toBe(true)
         expect(booksCollection.isSubscribed(book2.id)).toBe(true)
 
@@ -396,31 +419,34 @@ describe('Collection - Real-time Subscriptions', () => {
     }, 20000)
 
     it('should not create duplicate subscriptions', async () => {
-        const booksCollection = createBooksCollection(queryClient)
+        const factory = createCollectionFactory(queryClient)
+        const booksCollection = factory.create('books')
 
-        // Already subscribed automatically
+        // Initially not subscribed
+        expect(booksCollection.isSubscribed()).toBe(false)
+
+        // Subscribe manually
+        await booksCollection.subscribe()
         expect(booksCollection.isSubscribed()).toBe(true)
 
-        // Try to subscribe again
+        // Try to subscribe again - should not error
         await booksCollection.subscribe()
 
-        // Should still be subscribed (not errored)
+        // Should still be subscribed (not errored, no duplicate)
         expect(booksCollection.isSubscribed()).toBe(true)
 
         // Cleanup
         booksCollection.unsubscribeAll()
     })
 
-    it('should allow opting out of automatic subscriptions', async () => {
+    it('should not automatically subscribe on collection creation', async () => {
         const factory = createCollectionFactory(queryClient)
-        const booksCollection = factory.create('books', {
-            enableSubscriptions: false
-        })
+        const booksCollection = factory.create('books')
 
-        // Should NOT be subscribed automatically
+        // Collections are lazy - no subscription until queried
         expect(booksCollection.isSubscribed()).toBe(false)
 
-        // Manually subscribe
+        // Manually subscribe still works for advanced use cases
         await booksCollection.subscribe()
 
         // Now should be subscribed
@@ -430,23 +456,22 @@ describe('Collection - Real-time Subscriptions', () => {
         booksCollection.unsubscribeAll()
     })
 
-    it('should support conditional subscriptions with opt-out', async () => {
+    it('should automatically manage subscriptions based on query lifecycle', async () => {
         const factory = createCollectionFactory(queryClient)
 
-        // Create collection without auto-subscription
-        const booksCollection = factory.create('books', {
-            enableSubscriptions: false
-        })
+        // Create collection - no automatic subscription on creation
+        const booksCollection = factory.create('books')
 
         expect(booksCollection.isSubscribed()).toBe(false)
 
-        // Set up live query
-        const { result } = renderHook(() =>
+        // Set up live query - subscription should start automatically
+        const { result, unmount } = renderHook(() =>
             useLiveQuery((q) =>
                 q.from({ books: booksCollection })
             )
         )
 
+        // Wait for query to load
         await waitFor(
             () => {
                 expect(result.current.isLoading).toBe(false)
@@ -454,45 +479,39 @@ describe('Collection - Real-time Subscriptions', () => {
             { timeout: 5000 }
         )
 
-        const initialCount = result.current.data.length
+        // Give the subscription a moment to establish (since it's async)
+        await new Promise(resolve => setTimeout(resolve, 500))
+
+        // Subscription should now be active (triggered by useLiveQuery)
+        expect(booksCollection.isSubscribed()).toBe(true)
 
         // Create a new book
         const authorId = await getTestAuthorId()
         const newBook = await pb.collection('books').create({
-            title: `Opt-out Test ${Date.now().toString().slice(-8)}`,
+            title: `Auto-subscribe Test ${Date.now().toString().slice(-8)}`,
             genre: 'Fiction',
-            isbn: getTestSlug('opt'),
+            isbn: getTestSlug('auto'),
             author: authorId
         })
 
-        // Wait a bit to ensure no real-time update happens
-        await new Promise(resolve => setTimeout(resolve, 1000))
-
-        // Data should NOT have updated via real-time (no subscription active)
-        // The new book should not appear in the live query yet
-        expect(result.current.data.some(b => b.id === newBook.id)).toBe(false)
-
-        // Now manually subscribe
-        await booksCollection.subscribe()
-
-        // Create another book
-        const newBook2 = await pb.collection('books').create({
-            title: `Opt-out Test 2 ${Date.now().toString().slice(-8)}`,
-            genre: 'Fiction',
-            isbn: getTestSlug('opt2'),
-            author: authorId
-        })
-
-        // Now the update should propagate
+        // Wait for real-time update to propagate
         await waitFor(
             () => {
-                const hasNewBook = result.current.data.some(b => b.id === newBook2.id)
+                const hasNewBook = result.current.data.some(b => b.id === newBook.id)
                 return hasNewBook
             },
             { timeout: 5000 }
         )
 
-        expect(result.current.data.some(b => b.id === newBook2.id)).toBe(true)
+        expect(result.current.data.some(b => b.id === newBook.id)).toBe(true)
+
+        // Unmount the hook - subscription should be scheduled for cleanup
+        unmount()
+
+        // After cleanup delay (5 seconds), subscription should be removed
+        await new Promise(resolve => setTimeout(resolve, 6000))
+
+        expect(booksCollection.isSubscribed()).toBe(false)
 
         // Cleanup
         try {
@@ -500,11 +519,5 @@ describe('Collection - Real-time Subscriptions', () => {
         } catch (_error) {
             // Ignore cleanup errors
         }
-        try {
-            await pb.collection('books').delete(newBook2.id)
-        } catch (_error) {
-            // Ignore cleanup errors
-        }
-        booksCollection.unsubscribeAll()
-    }, 15000)
+    }, 20000)
 })

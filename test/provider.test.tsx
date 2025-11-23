@@ -39,7 +39,7 @@ describe('CollectionsProvider and Hooks', () => {
         it('should throw error when collection key does not exist', () => {
             const factory = createCollectionFactory(queryClient);
             const stores = {
-                books: factory.create('books', { enableSubscriptions: false }),
+                books: factory.create('books'),
             };
 
             const wrapper = ({ children }: { children: ReactNode }) => (
@@ -53,7 +53,7 @@ describe('CollectionsProvider and Hooks', () => {
 
         it('should return collection from provider', () => {
             const factory = createCollectionFactory(queryClient);
-            const booksCollection = factory.create('books', { enableSubscriptions: false });
+            const booksCollection = factory.create('books');
 
             const stores = {
                 books: booksCollection,
@@ -70,7 +70,7 @@ describe('CollectionsProvider and Hooks', () => {
 
         it('should allow using collection in useLiveQuery', async () => {
             const factory = createCollectionFactory(queryClient);
-            const booksCollection = factory.create('books', { enableSubscriptions: false });
+            const booksCollection = factory.create('books');
 
             const stores = {
                 books: booksCollection,
@@ -111,7 +111,7 @@ describe('CollectionsProvider and Hooks', () => {
         it('should throw error when any collection key does not exist', () => {
             const factory = createCollectionFactory(queryClient);
             const stores = {
-                books: factory.create('books', { enableSubscriptions: false }),
+                books: factory.create('books'),
             };
 
             const wrapper = ({ children }: { children: ReactNode }) => (
@@ -125,9 +125,9 @@ describe('CollectionsProvider and Hooks', () => {
 
         it('should return array of collections in correct order', () => {
             const factory = createCollectionFactory(queryClient);
-            const booksCollection = factory.create('books', { enableSubscriptions: false });
-            const authorsCollection = factory.create('authors', { enableSubscriptions: false });
-            const metadataCollection = factory.create('book_metadata', { enableSubscriptions: false });
+            const booksCollection = factory.create('books');
+            const authorsCollection = factory.create('authors');
+            const metadataCollection = factory.create('book_metadata');
 
             const stores = {
                 books: booksCollection,
@@ -154,8 +154,8 @@ describe('CollectionsProvider and Hooks', () => {
 
         it('should allow using collections in useLiveQuery with joins', async () => {
             const factory = createCollectionFactory(queryClient);
-            const booksCollection = factory.create('books', { enableSubscriptions: false });
-            const authorsCollection = factory.create('authors', { enableSubscriptions: false });
+            const booksCollection = factory.create('books');
+            const authorsCollection = factory.create('authors');
 
             const stores = {
                 books: booksCollection,
@@ -190,8 +190,8 @@ describe('CollectionsProvider and Hooks', () => {
     describe('CollectionsProvider', () => {
         it('should provide collections to nested components', () => {
             const factory = createCollectionFactory(queryClient);
-            const booksCollection = factory.create('books', { enableSubscriptions: false });
-            const authorsCollection = factory.create('authors', { enableSubscriptions: false });
+            const booksCollection = factory.create('books');
+            const authorsCollection = factory.create('authors');
 
             const stores = {
                 books: booksCollection,
@@ -215,7 +215,7 @@ describe('CollectionsProvider and Hooks', () => {
 
         it('should support custom collection keys', () => {
             const factory = createCollectionFactory(queryClient);
-            const booksCollection = factory.create('books', { enableSubscriptions: false });
+            const booksCollection = factory.create('books');
 
             const stores = {
                 myCustomBooksKey: booksCollection,

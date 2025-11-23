@@ -54,10 +54,16 @@ const logger = {
  * Manages real-time subscriptions to PocketBase collections.
  * Handles subscription lifecycle, reconnection with exponential backoff,
  * and automatic synchronization with TanStack DB collections.
+ *
+ * Subscriptions are automatically managed based on TanStack DB's subscriber count:
+ * - Start subscribing when first query becomes active
+ * - Stop subscribing when last query becomes inactive (with cleanup delay)
  */
 export class SubscriptionManager {
     private subscriptions: Map<string, Map<string, SubscriptionState>> = new Map();
     private subscriptionPromises: Map<string, Map<string, Promise<void>>> = new Map();
+    private cleanupTimers: Map<string, NodeJS.Timeout> = new Map();
+    private subscriberCounts: Map<string, number> = new Map();
 
     constructor(private pocketbase: PocketBase) {}
 
@@ -391,5 +397,89 @@ export class SubscriptionManager {
         });
 
         await Promise.race([promise, timeoutPromise]);
+    }
+
+    /**
+     * Track subscriber addition for a collection.
+     * Automatically subscribes when first subscriber is added.
+     *
+     * @param collectionName - The PocketBase collection name
+     * @param collection - The TanStack DB collection to sync with
+     */
+    async addSubscriber<T extends object>(
+        collectionName: string,
+        collection: Collection<T>
+    ): Promise<void> {
+        const currentCount = this.subscriberCounts.get(collectionName) || 0;
+        const newCount = currentCount + 1;
+        this.subscriberCounts.set(collectionName, newCount);
+
+        logger.debug('Subscriber added', { collectionName, count: newCount });
+
+        // Cancel any pending cleanup
+        const cleanupTimer = this.cleanupTimers.get(collectionName);
+        if (cleanupTimer) {
+            clearTimeout(cleanupTimer);
+            this.cleanupTimers.delete(collectionName);
+            logger.debug('Cleanup timer cancelled', { collectionName });
+        }
+
+        // Subscribe when first subscriber is added
+        if (newCount === 1 && !this.isSubscribed(collectionName)) {
+            logger.debug('First subscriber - starting subscription', { collectionName });
+            await this.subscribe(collectionName, collection);
+        }
+    }
+
+    /**
+     * Track subscriber removal for a collection.
+     * Automatically unsubscribes (with delay) when last subscriber is removed.
+     *
+     * @param collectionName - The PocketBase collection name
+     */
+    removeSubscriber(collectionName: string): void {
+        const currentCount = this.subscriberCounts.get(collectionName) || 0;
+        const newCount = Math.max(0, currentCount - 1);
+        this.subscriberCounts.set(collectionName, newCount);
+
+        logger.debug('Subscriber removed', { collectionName, count: newCount });
+
+        // Schedule cleanup when last subscriber is removed
+        if (newCount === 0) {
+            // Cancel any existing cleanup timer
+            const existingTimer = this.cleanupTimers.get(collectionName);
+            if (existingTimer) {
+                clearTimeout(existingTimer);
+            }
+
+            // Schedule unsubscribe with delay to prevent thrashing
+            const cleanupTimer = setTimeout(() => {
+                // Double-check subscriber count is still 0
+                const finalCount = this.subscriberCounts.get(collectionName) || 0;
+                if (finalCount === 0) {
+                    logger.debug('Cleanup timer fired - unsubscribing', { collectionName });
+                    this.unsubscribeAll(collectionName);
+                    this.subscriberCounts.delete(collectionName);
+                }
+                this.cleanupTimers.delete(collectionName);
+            }, SUBSCRIPTION_CONFIG.CLEANUP_DELAY_MS);
+
+            this.cleanupTimers.set(collectionName, cleanupTimer);
+            logger.debug('Cleanup timer scheduled', {
+                collectionName,
+                delayMs: SUBSCRIPTION_CONFIG.CLEANUP_DELAY_MS
+            });
+        }
+    }
+
+    /**
+     * Get the current subscriber count for a collection.
+     * Useful for debugging and testing.
+     *
+     * @param collectionName - The PocketBase collection name
+     * @returns Current subscriber count
+     */
+    getSubscriberCount(collectionName: string): number {
+        return this.subscriberCounts.get(collectionName) || 0;
     }
 }

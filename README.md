@@ -1,4 +1,4 @@
-# pocketbase-tanstack-db
+# pbtsdb: PocketBase TanStack Database Integration
 
 > Type-safe PocketBase integration with TanStack Query and TanStack DB
 
@@ -163,22 +163,23 @@ const booksCollection = factory.create('books');
 
 ### Real-time Subscriptions
 
-Collections automatically subscribe to PocketBase real-time updates:
+Collections manage subscriptions **automatically** based on query lifecycle:
 
 ```typescript
-// Automatic subscription (default behavior)
+// Collections are lazy - no subscription until queried
 const booksCollection = factory.create('books');
-// ✅ Now subscribed to all book changes
 
-// Disable auto-subscription
-const booksCollection = factory.create('books', {
-    enableSubscriptions: false
-});
+// Subscription starts automatically when query becomes active
+const { data } = useLiveQuery((q) =>
+    q.from({ books: booksCollection })
+);
+// ✅ Subscribed to changes while component is mounted
+// ✅ Unsubscribes automatically when component unmounts (with 5s cleanup delay)
 
-// Manually control subscriptions
+// Advanced: Manual subscription control
 await booksCollection.subscribe(); // Subscribe to all
 await booksCollection.subscribe('record_id'); // Subscribe to specific record
-booksCollection.unsubscribe(); // Unsubscribe from all
+booksCollection.unsubscribe('record_id'); // Unsubscribe from specific record
 booksCollection.unsubscribeAll(); // Clear all subscriptions
 ```
 
@@ -232,11 +233,10 @@ create<CollectionName>(
 **Options:**
 - `expand?: string` - Relations to expand (e.g., `'author,metadata'`)
 - `relations?: Record<string, Collection>` - Collections for manual joins
-- `enableSubscriptions?: boolean` - Enable/disable auto-subscriptions (default: `true`)
 
 **Examples:**
 
-Basic collection:
+Basic collection (lazy, subscribes automatically on first query):
 ```typescript
 const booksCollection = factory.create('books');
 ```
@@ -259,13 +259,6 @@ const booksCollection = factory.create('books', {
     relations: {
         author: authorsCollection
     }
-});
-```
-
-Disable auto-subscriptions:
-```typescript
-const booksCollection = factory.create('books', {
-    enableSubscriptions: false
 });
 ```
 
@@ -637,7 +630,7 @@ const { data } = useLiveQuery((q) =>
 
 #### Automatic Updates
 
-Collections automatically receive real-time updates:
+Collections automatically receive real-time updates based on query lifecycle:
 
 ```typescript
 function BooksList() {
@@ -645,27 +638,40 @@ function BooksList() {
         q.from({ books: booksCollection })
     );
 
+    // Subscription automatically starts when component mounts
     // Component re-renders automatically when:
     // - A book is created
     // - A book is updated
     // - A book is deleted
+    // Subscription automatically stops when component unmounts (with 5s delay)
 
     return <ul>{/* ... */}</ul>;
 }
 ```
 
-#### Manual Subscription Control
+**Subscription Lifecycle:**
+- ✅ Collections are lazy - no network activity on creation
+- ✅ Subscription starts when first `useLiveQuery` becomes active
+- ✅ Multiple queries share a single subscription per collection
+- ✅ Subscription stops 5 seconds after last query unmounts
+- ✅ Prevents thrashing during rapid mount/unmount cycles
+
+#### Manual Subscription Control (Advanced)
+
+For advanced use cases, you can manually control subscriptions:
 
 ```typescript
-const booksCollection = factory.create('books', {
-    enableSubscriptions: false // Disable auto-subscriptions
-});
+const booksCollection = factory.create('books');
 
-// Later, subscribe when needed
+// Manually subscribe (bypasses automatic lifecycle)
 await booksCollection.subscribe();
 
+// Subscribe to specific record
+await booksCollection.subscribe('record_id');
+
 // Unsubscribe when done
-booksCollection.unsubscribe();
+booksCollection.unsubscribe('record_id');
+booksCollection.unsubscribeAll();
 ```
 
 #### Subscribing to Specific Records
@@ -809,7 +815,7 @@ data[0].expand?.tags[0].name     // ✅ string
 **Use Type-Safe Expand when:**
 - You need fast, single-query performance
 - Relations are straightforward
-- You trust PocketBase access control
+
 
 ```typescript
 // ✅ Fast, simple, type-safe
@@ -820,8 +826,10 @@ const books = factory.create('books', {
 
 **Use TanStack Joins when:**
 - You need inner/right/full joins
+- You want the related records to update in response to sync
 - Complex client-side filtering after joins
 - Building computed fields from multiple collections
+
 
 ```typescript
 // ✅ Flexible, powerful, type-safe
@@ -831,16 +839,7 @@ const { data } = useLiveQuery((q) =>
 );
 ```
 
-### 2. Disable Subscriptions for Static Data
-
-```typescript
-// Metadata rarely changes - no need for real-time updates
-const configCollection = factory.create('config', {
-    enableSubscriptions: false
-});
-```
-
-### 3. Use Provider for App-Wide Collections
+### 2. Use Provider for App-Wide Collections
 
 ```typescript
 // ✅ Define collections once
@@ -855,7 +854,7 @@ const collections = {
 </CollectionsProvider>
 ```
 
-### 4. Type Your Hooks
+### 3. Type Your Hooks
 
 ```typescript
 // ✅ Explicit typing
@@ -865,7 +864,7 @@ const booksCollection = useStore<Book>('books');
 const [books, authors] = useStores<[Book, Author]>(['books', 'authors']);
 ```
 
-### 5. Handle Loading and Error States
+### 4. Handle Loading and Error States
 
 ```typescript
 const { data, isLoading, error } = useLiveQuery((q) =>
@@ -879,21 +878,24 @@ if (!data?.length) return <EmptyState />;
 return <BooksList books={data} />;
 ```
 
-### 6. Cleanup Subscriptions
+### 5. Subscriptions are Automatic
+
+No need to manually subscribe/unsubscribe - the library handles it:
 
 ```typescript
+// ❌ Don't do this (unless you have advanced use case)
 useEffect(() => {
-    // Subscribe on mount
     booksCollection.subscribe();
-
-    // Cleanup on unmount
-    return () => {
-        booksCollection.unsubscribe();
-    };
+    return () => booksCollection.unsubscribe();
 }, []);
+
+// ✅ Do this instead - automatic lifecycle management
+const { data } = useLiveQuery((q) =>
+    q.from({ books: booksCollection })
+);
 ```
 
-### 7. Use QueryClient Configuration
+### 6. Use QueryClient Configuration
 
 ```typescript
 const queryClient = new QueryClient({

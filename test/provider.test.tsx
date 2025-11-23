@@ -6,7 +6,7 @@ import { afterAll, beforeAll, beforeEach, afterEach, describe, expect, it } from
 import type { QueryClient } from '@tanstack/react-query';
 
 import { CollectionsProvider, useStore, useStores } from '../src/provider';
-import type { BooksRecord, AuthorsRecord, BookMetadataRecord } from './schema';
+import type { Books, Authors, BookMetadata } from './schema';
 import { pb, createTestQueryClient, authenticateTestUser, clearAuth, createCollectionFactory } from './helpers';
 
 describe('CollectionsProvider and Hooks', () => {
@@ -63,7 +63,7 @@ describe('CollectionsProvider and Hooks', () => {
                 <CollectionsProvider collections={stores}>{children}</CollectionsProvider>
             );
 
-            const { result } = renderHook(() => useStore<BooksRecord>('books'), { wrapper });
+            const { result } = renderHook(() => useStore<Books>('books'), { wrapper });
 
             expect(result.current).toBe(booksCollection);
         });
@@ -82,7 +82,7 @@ describe('CollectionsProvider and Hooks', () => {
 
             const { result } = renderHook(
                 () => {
-                    const collection = useStore<BooksRecord>('books');
+                    const collection = useStore<Books>('books');
                     return useLiveQuery((q) => q.from({ books: collection }));
                 },
                 { wrapper }
@@ -140,7 +140,7 @@ describe('CollectionsProvider and Hooks', () => {
             );
 
             const { result } = renderHook(
-                () => useStores<[BooksRecord, AuthorsRecord, BookMetadataRecord]>(
+                () => useStores<[Books, Authors, BookMetadata]>(
                     ['books', 'authors', 'metadata']
                 ),
                 { wrapper }
@@ -168,7 +168,7 @@ describe('CollectionsProvider and Hooks', () => {
 
             const { result } = renderHook(
                 () => {
-                    const [books] = useStores<[BooksRecord]>(['books']);
+                    const [books] = useStores<[Books]>(['books']);
                     return useLiveQuery((q) => q.from({ books }));
                 },
                 { wrapper }
@@ -202,11 +202,11 @@ describe('CollectionsProvider and Hooks', () => {
                 <CollectionsProvider collections={stores}>{children}</CollectionsProvider>
             );
 
-            const { result } = renderHook(() => useStore<BooksRecord>('books'), { wrapper });
+            const { result } = renderHook(() => useStore<Books>('books'), { wrapper });
 
             expect(result.current).toBe(booksCollection);
 
-            const { result: result2 } = renderHook(() => useStore<AuthorsRecord>('authors'), {
+            const { result: result2 } = renderHook(() => useStore<Authors>('authors'), {
                 wrapper,
             });
 
@@ -225,7 +225,7 @@ describe('CollectionsProvider and Hooks', () => {
                 <CollectionsProvider collections={stores}>{children}</CollectionsProvider>
             );
 
-            const { result } = renderHook(() => useStore<BooksRecord>('myCustomBooksKey'), { wrapper });
+            const { result } = renderHook(() => useStore<Books>('myCustomBooksKey'), { wrapper });
 
             expect(result.current).toBe(booksCollection);
         });

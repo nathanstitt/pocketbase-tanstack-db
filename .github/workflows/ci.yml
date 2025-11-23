@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  checks:
+    name: Lint & Typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run checks
+        run: npm run checks
+
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install PocketBase
+        run: |
+          wget https://github.com/pocketbase/pocketbase/releases/download/v0.26.3/pocketbase_0.26.3_linux_amd64.zip
+          unzip pocketbase_0.26.3_linux_amd64.zip
+          chmod +x pocketbase
+          sudo mv pocketbase /usr/local/bin/
+
+      - name: Create test environment
+        run: |
+          echo "TESTING_PB_ADDR=http://127.0.0.1:8210" >> .env
+          echo "TEST_USER_EMAIL=test@example.com" >> .env
+          echo "TEST_USER_PW=testpassword123" >> .env
+
+      - name: Run tests
+        run: npm test

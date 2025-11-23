@@ -971,6 +971,61 @@ ISC
 
 Contributions welcome! Please open an issue or PR.
 
+### Development Setup
+
+**Prerequisites:**
+- Node.js 18+
+- Git
+
+**Clone and Install:**
+```bash
+git clone https://github.com/yourusername/pocketbase-tanstack-db
+cd pocketbase-tanstack-db
+npm install
+```
+
+### Running Tests
+
+Tests use a real PocketBase instance with **fully automated infrastructure**:
+
+```bash
+npm test  # Auto-resets DB → Starts server → Runs tests → Stops server
+```
+
+The `npm test` command automatically:
+1. Resets the test database to a clean state
+2. Applies migrations and creates test collections
+3. Starts PocketBase server on port 8210
+4. Runs all Vitest tests
+5. Stops the server when complete
+
+**No manual server setup required!** All test infrastructure is automated.
+
+**Advanced (for watch mode or debugging):**
+```bash
+# Start test server manually
+npm run test:server
+
+# Run tests against running server (in another terminal)
+npm run test:run
+
+# Just reset database without starting server
+npm run db:reset
+```
+
+### Code Quality
+
+```bash
+npm run checks      # Run TypeScript type checking and linting
+npm run lint:fix    # Auto-fix linting issues
+npm run typecheck   # TypeScript only
+```
+
+### Documentation
+
+- See [AGENTS.md](AGENTS.md) for comprehensive development guidelines
+- See [test/README.md](test/README.md) for detailed testing documentation
+
 ---
 
 **Built with:**

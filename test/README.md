@@ -123,22 +123,31 @@ Test environment setup and global configuration.
 
 ## Running Tests
 
+**Recommended (Fully Automated):**
 ```bash
-# Run all tests (starts server automatically)
-npm test
+npm test  # Resets DB → Starts server → Runs tests → Stops server
+```
 
+The `npm test` command automatically:
+1. Resets the database and applies migrations
+2. Creates/updates test superuser from `.env` credentials
+3. Starts PocketBase server on port 8210
+4. Waits for server health check
+5. Runs all Vitest tests
+6. Stops the server when complete
+
+**Advanced Options:**
+```bash
 # Run specific test file
 npm run test:run -- test-collections.test.ts
 
-# Run tests in watch mode (start server manually first)
-npm run test:server:start  # In one terminal
-npm run test:run -- --watch  # In another terminal
-
 # Run with verbose output
 npm run test:run -- --reporter=verbose
-```
 
-**Note:** When using `start-server-and-test`, the server automatically starts and stops with each test run. For watch mode or repeated test runs, it's more efficient to start the server manually and use `npm run test:run`.
+# Manual server control (for watch mode or debugging)
+npm run test:server  # Start server manually
+npm run test:run -- --watch  # In another terminal
+```
 
 ## Test Organization Principles
 
@@ -178,17 +187,19 @@ The `npm test` command uses `start-server-and-test` to automatically:
 5. Run the test suite with Vitest
 6. Shut down the server when tests complete
 
-**Manual Server Control** (if needed):
+**Manual Control** (rarely needed - only for debugging or watch mode):
 ```bash
-# Start server manually (resets DB, creates superuser, starts server)
-npm run test:server:start
-
-# Run tests without starting server (in separate terminal)
-npm run test:run
-
-# Just reset database and run migrations (no server)
+# Reset database only (no server start)
 npm run db:reset
+
+# Start server manually (for watch mode)
+npm run test:server
+
+# Run tests against manually-started server
+npm run test:run
 ```
+
+**Most users should just use `npm test` and let automation handle everything.**
 
 ### Test Server Script
 
@@ -276,7 +287,5 @@ TEST_USER_PW=testpassword123
 PocketBase database files are stored in `pb_data/` and are **excluded from git** (in `.gitignore`). This allows each developer to have their own local test database.
 
 To reset your local database:
-1. Stop the test server
 2. Delete the `pb_data/` directory
-3. Run migrations again: `npm run test:server:migrate`
-4. Start the server: `npm run test:server:start`
+1. run: `npm run test:reset`

@@ -1,5 +1,5 @@
 {
-  "name": "pocketbase-tanstack-db",
+  "name": "pbtsdb",
   "version": "0.0.0",
   "description": "Type-safe PocketBase integration with TanStack Query and TanStack DB",
   "keywords": [
@@ -46,10 +46,9 @@
     "lint": "biome check .",
     "lint:fix": "biome check . --write",
     "typecheck": "tsc  --noEmit --skipLibCheck",
-    "test": "start-server-and-test test:server:start http://127.0.0.1:8210/api/health test:run",
+    "test": "start-server-and-test test:server http://127.0.0.1:8210/api/health test:run",
     "test:run": "vitest",
-    "test:server": "pocketbase serve --http http://localhost:1214",
-    "test:server:start": "./scripts/start-test-server.sh",
+    "test:server": "./scripts/start-test-server.sh",
     "test:server:migrate": "pocketbase migrate --dir ./pb_data"
   },
   "peerDependencies": {

@@ -1,0 +1,91 @@
+# pbtsdb
+
+> Type-safe PocketBase integration with TanStack Query and TanStack DB for React applications. Provides reactive collections with automatic real-time subscriptions, full TypeScript type safety, and minimal boilerplate.
+
+This library connects PocketBase (backend-as-a-service) to TanStack's reactive database tools. Use it when building React applications that need real-time data synchronization with PocketBase while maintaining strict type safety.
+
+## Core Pattern
+
+```typescript
+// 1. Define schema with type and relations properties
+export type Schema = {
+    books: {
+        type: Book;
+        relations: {
+            author?: Author;
+        };
+    };
+}
+
+// 2. Create factory (once per app)
+const factory = new CollectionFactory<Schema>(pb, queryClient);
+
+// 3. Create collections with optional expand for type-safe relations
+const booksCollection = factory.create('books', {
+    expand: 'author' as const  // Use 'as const' for type inference
+});
+
+// 4. Use in React components with automatic subscriptions
+const { data } = useLiveQuery((q) => q.from({ books: booksCollection }));
+// Subscriptions start/stop automatically with component lifecycle
+```
+
+## Key Concepts
+
+- **CollectionFactory**: Create ONE factory per app, use it to create multiple collections
+- **Collections are lazy**: No network activity until first query
+- **Subscriptions are automatic**: Start when component mounts, stop 5s after unmount
+- **Type-safe expand**: Use `as const` on expand strings for full TypeScript inference
+- **Schema structure**: Use `type` and `relations` properties (not `Row`/`Relations`)
+
+## Testing
+
+```bash
+npm test  # Auto-resets DB, starts server, runs tests, stops server
+```
+
+Tests use real PocketBase instance (not mocked). Server infrastructure is fully automated.
+
+## Documentation
+
+- [AGENTS.md](AGENTS.md): Complete development guide with architecture, patterns, and testing
+- [README.md](README.md): User-facing API reference with examples
+- [test/schema.ts](test/schema.ts): Reference schema implementation
+
+## Common Patterns
+
+**Approach 1: Type-Safe Expand (Recommended)**
+```typescript
+const jobs = factory.create('jobs', { expand: 'customer,address' as const });
+// Single PocketBase query, server-side join, fully typed expand property
+```
+
+**Approach 2: TanStack Joins (Advanced)**
+```typescript
+const jobs = factory.create('jobs', { relations: { customer: customersCollection }});
+// Client-side joins with full type safety, supports inner/left/right/full joins
+```
+
+## Critical Rules
+
+- NEVER use `any` types - defeats the purpose of this library
+- ALWAYS use `as const` on expand strings for type inference
+- Create ONE CollectionFactory instance per PocketBase connection
+- Schema must match actual PocketBase collection structure
+- Code should be self-documenting - avoid obvious comments
+
+## Optional
+
+### When NOT to Use
+
+- Non-React environments (use PocketBase SDK directly)
+- Simple CRUD without real-time (PocketBase SDK is simpler)
+- Very large collections (>10k records - use pagination)
+- Non-PocketBase backends (use TanStack Query directly)
+
+### Package Details
+
+- Requires React 18+, TypeScript 5.0+, PocketBase 0.21.0+
+- Collections use TanStack Query for caching and TanStack DB for reactivity
+- Real-time via PocketBase Server-Sent Events (SSE)
+- Automatic reconnection with exponential backoff on subscription failures

@@ -1314,5 +1314,97 @@ export type Schema = {
             org: Orgs
         }
     }
+    authors: {
+        type: Authors
+        relations: {
+            books_via_author?: Books[]
+        }
+    }
+    books: {
+        type: Books
+        relations: {
+            author: Authors
+            book_metadata_via_book?: BookMetadata
+            book_tags_via_book?: BookTags[]
+        }
+    }
+    book_metadata: {
+        type: BookMetadata
+        relations: {
+            book: Books
+        }
+    }
+    test_tags: {
+        type: TestTags
+        relations: {
+            book_tags_via_tag?: BookTags[]
+        }
+    }
+    book_tags: {
+        type: BookTags
+        relations: {
+            book: Books
+            tag: TestTags
+        }
+    }
 }
+
+// Test collection types for testing relationships
+export interface Authors {
+    id: string
+    name: string
+    bio: string
+    email: string
+    created: string
+    updated: string
+}
+
+export interface Books {
+    id: string
+    title: string
+    isbn: string
+    published_date: string
+    page_count: number
+    genre: 'Fiction' | 'Non-Fiction' | 'Science Fiction' | 'Fantasy' | 'Mystery' | 'Romance' | 'Thriller' | 'Biography' | 'History' | 'Science' | 'Self-Help' | 'Other'
+    author: string
+    created: string
+    updated: string
+}
+
+export interface BookMetadata {
+    id: string
+    book: string
+    summary: string
+    genre: 'Fiction' | 'Non-Fiction' | 'Science Fiction' | 'Fantasy' | 'Mystery' | 'Romance' | 'Thriller' | 'Biography' | 'History' | 'Science' | 'Self-Help' | 'Other'
+    language: string
+    rating: number
+    created: string
+    updated: string
+}
+
+export interface BookTags {
+    id: string
+    book: string
+    tag: string
+    created: string
+    updated: string
+}
+
+export interface TestTags {
+    id: string
+    name: string
+    color: string
+    created: string
+    updated: string
+}
+
+// Type aliases for common record types used in tests
+export type JobsRecord = Jobs;
+export type CustomersRecord = Customers;
+export type AddressesRecord = Addresses;
+export type AuthorsRecord = Authors;
+export type BooksRecord = Books;
+export type BookMetadataRecord = BookMetadata;
+export type BookTagsRecord = BookTags;
+export type TestTagsRecord = TestTags;
 

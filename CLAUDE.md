@@ -186,6 +186,144 @@ interface Schema extends SchemaDeclaration {
 - Regenerate types if using PocketBase SDK type generation
 - Run tests to catch type mismatches
 
+### Working with Relationships: Type-Safe Expand vs TanStack Joins
+
+**IMPORTANT:** pbtsdb provides TWO fully type-safe approaches for working with related data. Choose based on your use case:
+
+#### Approach 1: Type-Safe PocketBase Expand (Recommended for most cases)
+
+Use when you need **server-side performance** with a single query.
+
+```typescript
+const collections = new CollectionFactory<Schema>(pb, queryClient);
+
+// Type-safe expand with full autocomplete
+const jobsCollection = collections.create('jobs', {
+    expand: 'customer,address' as const
+});
+
+// In your React component
+const { data } = useLiveQuery((q) =>
+    q.from({ jobs: jobsCollection })
+);
+
+// The expand property is now FULLY TYPED - no `any` types!
+if (data[0]?.expand) {
+    // TypeScript knows these exist and their types
+    const customerName: string = data[0].expand.customer.name;  // ✅ Type-safe
+    const addressCity: string = data[0].expand.address.city;    // ✅ Type-safe
+}
+```
+
+**Advantages:**
+- ✅ Single query to PocketBase (fast)
+- ✅ Server-side expansion (efficient)
+- ✅ Fully type-safe expand property
+- ✅ Works with PocketBase access control
+
+**When to use:**
+- Fetching records with their relations for display
+- Need performance-critical single queries
+- Want PocketBase to handle access control on relations
+
+#### Approach 2: TanStack DB Joins (For complex client-side operations)
+
+Use when you need **client-side join flexibility** or complex query logic.
+
+```typescript
+const collections = new CollectionFactory<Schema>(pb, queryClient);
+
+// Create collections with relations config
+const customersCollection = collections.create('customers');
+const jobsCollection = collections.create('jobs', {
+    relations: {
+        customer: customersCollection  // ✅ Type-checked
+    }
+});
+
+// Use TanStack DB joins
+const { data } = useLiveQuery((q) =>
+    q.from({ job: jobsCollection })
+        .join(
+            { customer: customersCollection },
+            ({ job, customer }) => eq(job.customer, customer.id),
+            'left'  // or 'inner', 'right', 'full'
+        )
+        .select(({ job, customer }) => ({
+            ...job,
+            expand: {
+                customer: customer ? { ...customer } : undefined
+            }
+        }))
+);
+
+// Fully typed joined data
+const customerName: string | undefined = data[0]?.expand?.customer?.name;  // ✅ Type-safe
+```
+
+**Advantages:**
+- ✅ Full join type support (left, right, inner, full)
+- ✅ Client-side filtering after join
+- ✅ Complex multi-collection queries
+- ✅ Fully type-safe results
+
+**When to use:**
+- Need inner joins to filter out records without relations
+- Complex multi-step client-side data transformations
+- Building aggregations or computed fields from multiple collections
+
+#### Comparison Table
+
+| Feature | Type-Safe Expand | TanStack Joins |
+|---------|-----------------|----------------|
+| **Performance** | ⚡ Fast (1 query) | 🐌 Slower (multiple queries) |
+| **Type Safety** | ✅ Full | ✅ Full |
+| **Join Types** | ❌ Left join only | ✅ All (left/right/inner/full) |
+| **Server Load** | ✅ Low | ⚠️ Higher (multiple fetches) |
+| **Access Control** | ✅ PocketBase enforced | ⚠️ Manual filtering needed |
+| **Complexity** | ✅ Simple | ⚠️ More verbose |
+
+#### Best Practices
+
+1. **Default to Type-Safe Expand:**
+   ```typescript
+   // ✅ GOOD: Simple, fast, type-safe
+   const jobs = collections.create('jobs', {
+       expand: 'customer,address' as const
+   });
+   ```
+
+2. **Use Joins for Filtering:**
+   ```typescript
+   // ✅ GOOD: When you need inner join behavior
+   q.from({ job: jobsCollection })
+       .join(
+           { customer: customersCollection },
+           ({ job, customer }) => eq(job.customer, customer.id),
+           'inner'  // Only jobs WITH customers
+       )
+   ```
+
+3. **Combine Both Approaches:**
+   ```typescript
+   // ✅ GOOD: Expand for some, join for complex logic
+   const jobs = collections.create('jobs', {
+       expand: 'address' as const,  // Simple expansion
+       relations: {
+           customer: customersCollection  // For manual joins
+       }
+   });
+   ```
+
+4. **Use `as const` for Expand Strings:**
+   ```typescript
+   // ✅ GOOD: Enables proper type inference
+   expand: 'customer,address' as const
+
+   // ❌ BAD: Type inference limited
+   expand: 'customer,address'
+   ```
+
 ### Working with Collections
 
 **1. Creating Collections:**

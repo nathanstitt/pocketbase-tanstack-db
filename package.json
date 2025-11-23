@@ -1,35 +1,51 @@
 {
-  "name": "pbtsdb",
+  "name": "pocketbase-tanstack-db",
   "version": "1.0.0",
-  "description": "",
+  "description": "Type-safe PocketBase integration with TanStack Query and TanStack DB",
   "license": "ISC",
   "author": "",
   "type": "commonjs",
   "main": "index.js",
   "scripts": {
+    "db:reset": "rm -rf ./pb_data && pocketbase migrate up",
     "checks": "run-p typecheck lint",
     "lint": "biome check .",
     "lint:fix": "biome check . --write",
     "typecheck": "tsc  --noEmit --skipLibCheck",
-    "test": "vitest"
+    "test": "start-server-and-test test:server:start http://127.0.0.1:8811/api/health test:run",
+    "test:run": "vitest",
+    "test:server": "pocketbase serve --http http://localhost:1214",
+    "test:server:start": "./scripts/start-test-server.sh",
+    "test:server:migrate": "pocketbase migrate --dir ./pb_data"
   },
   "dependencies": {
-    "@tanstack/query-db-collection": "^1.0.4",
-    "@tanstack/react-db": "^0.1.49",
-    "@tanstack/react-query": "^5.90.10",
-    "biome": "^0.3.3",
-    "pocketbase": "^0.26.3",
-    "react": "^19.2.0",
-    "react-dom": "^19.2.0",
-    "tsx": "^4.20.6",
-    "typescript": "^5.9.3"
+  },
+  "peerDependencies": {
+    "pocketbase": ">=0.21.0",
+    "@tanstack/query-db-collection": ">=1.0.0",
+    "@tanstack/react-db": ">=0.1.0",
+    "@tanstack/react-query": ">=5.0.0",
+    "react": ">=18.0.0",
+    "react-dom": ">=18.0.0"
   },
   "devDependencies": {
-    "@testing-library/react": "^16.3.0",
-    "@types/node": "^24.10.1",
-    "dotenv": "^17.2.3",
-    "jsdom": "^27.2.0",
-    "npm-run-all": "^4.1.5",
-    "vitest": "^4.0.13"
+    "pocketbase": ">=0.21.0",
+    "@tanstack/query-db-collection": ">=1.0.0",
+    "@tanstack/react-db": ">=0.1.0",
+    "@tanstack/react-query": ">=5.0.0",
+    "@testing-library/react": ">=14.0.0",
+    "@types/node": ">=18.0.0",
+    "@types/react": ">=18.0.0",
+    "biome": ">=0.3.0",
+    "dotenv": ">=16.0.0",
+    "eventsource": ">=2.0.0",
+    "jsdom": ">=20.0.0",
+    "npm-run-all": ">=4.0.0",
+    "react": ">=18.0.0",
+    "react-dom": ">=18.0.0",
+    "start-server-and-test": ">=2.0.0",
+    "tsx": ">=4.0.0",
+    "typescript": ">=5.0.0",
+    "vitest": ">=1.0.0"
   }
 }

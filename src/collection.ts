@@ -1,256 +1,58 @@
 import PocketBase from 'pocketbase';
-import type { UnsubscribeFunc } from 'pocketbase';
 import { createCollection, type Collection } from "@tanstack/db"
 import { queryCollectionOptions } from "@tanstack/query-db-collection"
 import { QueryClient } from '@tanstack/react-query'
-import { convertToPocketBaseFilter, convertToPocketBaseSort } from './query-converter';
+import { SubscriptionManager } from './subscription-manager';
+import type {
+    SchemaDeclaration,
+    SubscribableCollection,
+    JoinHelper,
+    CreateCollectionOptions,
+    RelationsConfig,
+    WithExpand,
+} from './types';
 
-export interface SchemaDeclaration {
-    [collectionName: string]: {
-        type: any;
-        relations?: any;
-    };
+// Re-export commonly used types for convenience
+export type {
+    SchemaDeclaration,
+    SubscribableCollection,
+    JoinHelper,
+    CreateCollectionOptions,
+    RelationsConfig,
+} from './types';
+
+// Re-export React provider and hooks
+export {
+    CollectionsProvider,
+    useStore,
+    useStores,
+    type CollectionsMap,
+    type CollectionsProviderProps,
+} from './provider';
+
+/**
+ * Helper function to build PocketBase query options.
+ * Centralizes query option construction for consistency and future extensibility.
+ */
+function buildPocketBaseQueryOptions<E extends string | undefined>(
+    expand?: E
+): { expand?: string } {
+    const options: { expand?: string } = {};
+    if (expand) {
+        options.expand = expand;
+    }
+    return options;
 }
 
-// PocketBase real-time event structure (matches RecordSubscription from pocketbase SDK)
-interface RealtimeEvent<T = Record<string, any>> {
-    action: string;
-    record: T;
-}
-
-// Subscription state tracking
-interface SubscriptionState {
-    unsubscribe: UnsubscribeFunc;
-    recordId?: string;
-    reconnectAttempts: number;
-    isReconnecting: boolean;
-}
-
-// Enhanced collection with subscription management
-export interface SubscribableCollection<T = any> {
-    subscribe: (recordId?: string) => void;
-    unsubscribe: (recordId?: string) => void;
-    unsubscribeAll: () => void;
-    isSubscribed: (recordId?: string) => boolean;
-}
-
-// Type utility to extract the record type from a schema collection
-type ExtractRecordType<Schema extends SchemaDeclaration, CollectionName extends keyof Schema> = Schema[CollectionName]['type'];
-
-// Type utility to extract relations from schema
-type ExtractRelations<Schema extends SchemaDeclaration, CollectionName extends keyof Schema> =
-    Schema[CollectionName] extends { relations: infer R } ? R : never;
-
-// Configuration for relations - maps field names to their collections
-export type RelationsConfig<Schema extends SchemaDeclaration, CollectionName extends keyof Schema> = {
-    [K in keyof ExtractRelations<Schema, CollectionName>]?: Collection<any>;
-};
-
-// Options for creating a collection
-export interface CreateCollectionOptions<Schema extends SchemaDeclaration, CollectionName extends keyof Schema> {
-    relations?: RelationsConfig<Schema, CollectionName>;
-    /**
-     * Comma-separated list of relation fields to auto-expand.
-     * Example: "customer,location" or "user.org"
-     */
-    expand?: string;
-}
-
-
-// export declare class PocketBaseTS<TSchema extends SchemaDeclaration, TMaxDepth extends 0 | 1 | 2 | 3 | 4 | 5 | 6 = 2> extends PocketBase {
-//     #private;
-//     constructor(baseUrl?: string, authStore?: BaseAuthStore | null, lang?: string);
-//     collection<TName extends (keyof TSchema & string) | (string & {})>(idOrName: TName): RecordServiceTS<TSchema, TName, TMaxDepth>;
-//     createBatch(): BatchServiceTS<TSchema>;
-// }
-
-
+/**
+ * Factory for creating type-safe TanStack DB collections backed by PocketBase.
+ * Integrates real-time subscriptions with automatic synchronization.
+ */
 export class CollectionFactory<Schema extends SchemaDeclaration, TMaxDepth extends 0 | 1 | 2 | 3 | 4 | 5 | 6 = 2> {
-    private subscriptions: Map<string, Map<string, SubscriptionState>> = new Map();
-    private readonly MAX_RECONNECT_ATTEMPTS = 5;
-    private readonly BASE_RECONNECT_DELAY = 1000; // 1 second
+    private subscriptionManager: SubscriptionManager;
 
-    constructor(public pocketbase: PocketBase, public queryClient: QueryClient){ }
-
-    /**
-     * Setup real-time subscription for a collection
-     */
-    private async setupSubscription<T extends object = any>(
-        collectionName: string,
-        collection: Collection<T>,
-        recordId?: string
-    ): Promise<UnsubscribeFunc> {
-        const subscriptionKey = recordId || '*';
-
-        const eventHandler = (event: RealtimeEvent<T>) => {
-            // Use direct writes to sync changes to TanStack DB
-            collection.utils.writeBatch(() => {
-                switch (event.action) {
-                    case 'create':
-                        collection.utils.writeInsert(event.record);
-                        break;
-                    case 'update':
-                        collection.utils.writeUpdate(event.record);
-                        break;
-                    case 'delete':
-                        collection.utils.writeDelete((event.record as any).id);
-                        break;
-                }
-            });
-        };
-
-        // Subscribe to PocketBase real-time updates
-        return await this.pocketbase
-            .collection(collectionName)
-            .subscribe(subscriptionKey, eventHandler);
-    }
-
-    /**
-     * Handle reconnection with exponential backoff
-     */
-    private async handleReconnection<T extends object = any>(
-        collectionName: string,
-        collection: Collection<T>,
-        recordId?: string
-    ): Promise<void> {
-        const collectionSubs = this.subscriptions.get(collectionName);
-        if (!collectionSubs) return;
-
-        const subscriptionKey = recordId || '*';
-        const state = collectionSubs.get(subscriptionKey);
-        if (!state || state.isReconnecting) return;
-
-        state.isReconnecting = true;
-
-        while (state.reconnectAttempts < this.MAX_RECONNECT_ATTEMPTS) {
-            const delay = this.BASE_RECONNECT_DELAY * Math.pow(2, state.reconnectAttempts);
-            await new Promise(resolve => setTimeout(resolve, delay));
-
-            try {
-                // Attempt to resubscribe
-                const newUnsubscribe = await this.setupSubscription(
-                    collectionName,
-                    collection,
-                    recordId
-                );
-
-                state.unsubscribe = newUnsubscribe;
-                state.reconnectAttempts = 0;
-                state.isReconnecting = false;
-                return;
-            } catch (error) {
-                state.reconnectAttempts++;
-            }
-        }
-
-        // Max attempts reached, give up
-        state.isReconnecting = false;
-        collectionSubs.delete(subscriptionKey);
-    }
-
-    /**
-     * Subscribe to real-time updates for a collection
-     */
-    private subscribeToCollection<T extends object = any>(
-        collectionName: string,
-        collection: Collection<T>,
-        recordId?: string
-    ): void {
-        if (!this.subscriptions.has(collectionName)) {
-            this.subscriptions.set(collectionName, new Map());
-        }
-
-        const collectionSubs = this.subscriptions.get(collectionName)!;
-        const subscriptionKey = recordId || '*';
-
-        // Don't subscribe if already subscribed
-        if (collectionSubs.has(subscriptionKey)) {
-            return;
-        }
-
-        // Create a placeholder subscription state immediately (synchronous)
-        // This ensures isSubscribed() returns true right away
-        const placeholderUnsubscribe = async () => { /* will be replaced */ };
-        collectionSubs.set(subscriptionKey, {
-            unsubscribe: placeholderUnsubscribe,
-            recordId,
-            reconnectAttempts: 0,
-            isReconnecting: false,
-        });
-
-        // Setup subscription asynchronously
-        this.setupSubscription(collectionName, collection, recordId).then((unsubscribe) => {
-            // Replace placeholder with actual unsubscribe function
-            const state = collectionSubs.get(subscriptionKey);
-            if (state) {
-                state.unsubscribe = unsubscribe;
-            }
-        }).catch((error) => {
-            // Remove placeholder on error
-            collectionSubs.delete(subscriptionKey);
-            // Handle subscription error - try to reconnect
-            this.handleReconnection(collectionName, collection, recordId);
-        });
-
-        // Setup auto-reconnect on SSE disconnect (5-minute timeout)
-        // Note: PocketBase doesn't expose disconnect events, so we monitor via
-        // periodic health checks or rely on error handling in subscription
-        const checkInterval = setInterval(() => {
-            const state = collectionSubs.get(subscriptionKey);
-            if (!state) {
-                clearInterval(checkInterval);
-                return;
-            }
-
-            // If subscription is still active, no action needed
-            // In production, you might want to implement a heartbeat check
-        }, 60000); // Check every minute
-    }
-
-    /**
-     * Unsubscribe from real-time updates
-     */
-    private unsubscribeFromCollection(collectionName: string, recordId?: string): void {
-        const collectionSubs = this.subscriptions.get(collectionName);
-        if (!collectionSubs) return;
-
-        const subscriptionKey = recordId || '*';
-        const state = collectionSubs.get(subscriptionKey);
-
-        if (state) {
-            state.unsubscribe();
-            collectionSubs.delete(subscriptionKey);
-        }
-
-        // Clean up collection map if empty
-        if (collectionSubs.size === 0) {
-            this.subscriptions.delete(collectionName);
-        }
-    }
-
-    /**
-     * Unsubscribe from all subscriptions for a collection
-     */
-    private unsubscribeAll(collectionName: string): void {
-        const collectionSubs = this.subscriptions.get(collectionName);
-        if (!collectionSubs) return;
-
-        for (const state of collectionSubs.values()) {
-            state.unsubscribe();
-        }
-
-        this.subscriptions.delete(collectionName);
-    }
-
-    /**
-     * Check if subscribed to a collection
-     */
-    private isSubscribed(collectionName: string, recordId?: string): boolean {
-        const collectionSubs = this.subscriptions.get(collectionName);
-        if (!collectionSubs) return false;
-
-        const subscriptionKey = recordId || '*';
-        return collectionSubs.has(subscriptionKey);
+    constructor(public pocketbase: PocketBase, public queryClient: QueryClient) {
+        this.subscriptionManager = new SubscriptionManager(pocketbase);
     }
 
     /**
@@ -283,6 +85,21 @@ export class CollectionFactory<Schema extends SchemaDeclaration, TMaxDepth exten
      * // Check subscription status
      * const isSubbed = jobsCollection.isSubscribed(); // collection-wide
      * const isSubbed2 = jobsCollection.isSubscribed('record_id_123'); // specific record
+     * ```
+     *
+     * @example
+     * Opt-out of automatic subscriptions:
+     * ```ts
+     * // Disable auto-subscription for better control
+     * const jobsCollection = factory.create('jobs', {
+     *     enableSubscriptions: false
+     * });
+     *
+     * // Later, manually subscribe when needed
+     * jobsCollection.subscribe(); // Subscribe to all changes
+     *
+     * // Or subscribe to specific record
+     * jobsCollection.subscribe('record_id_123');
      * ```
      *
      * @example
@@ -336,74 +153,66 @@ export class CollectionFactory<Schema extends SchemaDeclaration, TMaxDepth exten
      * );
      * ```
      */
-    create<C extends keyof Schema & string>(
+    create<
+        C extends keyof Schema & string,
+        E extends string | undefined = undefined
+    >(
         collection: C,
-        options?: CreateCollectionOptions<Schema, C>
-    ): Collection<ExtractRecordType<Schema, C>> & SubscribableCollection<ExtractRecordType<Schema, C>> {
-        type RecordType = ExtractRecordType<Schema, C>;
+        options?: CreateCollectionOptions<Schema, C, E>
+    ): Collection<WithExpand<Schema, C, E>> & SubscribableCollection<WithExpand<Schema, C, E>> & JoinHelper<Schema, C, WithExpand<Schema, C, E>> {
+        type RecordType = WithExpand<Schema, C, E>;
 
         const baseCollection = createCollection(
             queryCollectionOptions<RecordType>({
                 queryKey: [collection],
-                syncMode: 'on-demand', // Enable predicate push-down to PocketBase
-                queryFn: async (ctx) => {
-                    // Extract TanStack DB query parameters
-                    const { where, orderBy, limit } = ctx.meta?.loadSubsetOptions || {};
+                // No syncMode - use default behavior which auto-loads data
+                queryFn: async () => {
+                    // Build query options using helper
+                    const queryOptions = buildPocketBaseQueryOptions(options?.expand);
 
-                    // Convert TanStack DB query language to PocketBase syntax
-                    const filter = convertToPocketBaseFilter(where);
-                    const sort = convertToPocketBaseSort(orderBy);
-
-                    // Build PocketBase query options
-                    const queryOptions: Record<string, any> = {};
-
-                    if (filter) {
-                        queryOptions.filter = filter;
-                    }
-
-                    if (sort) {
-                        queryOptions.sort = sort;
-                    }
-
-                    if (limit) {
-                        queryOptions.perPage = limit;
-                    }
-
-                    if (options?.expand) {
-                        queryOptions.expand = options.expand;
-                    }
-
-                    // Execute query against PocketBase
+                    // Execute query against PocketBase - fetch all data
                     const result = await this.pocketbase
                         .collection(collection)
                         .getFullList(queryOptions);
 
+                    // Return the result with proper typing
                     return result as unknown as RecordType[];
                 },
                 queryClient: this.queryClient,
-                getKey: (item: RecordType) => (item as any).id as string,
+                getKey: (item: RecordType) => (item as { id: string }).id,
             })
         );
 
-        // Enhance collection with subscription management methods
+        // Enhance collection with subscription management methods and join helpers
         const subscribableCollection = Object.assign(baseCollection, {
-            subscribe: (recordId?: string) => {
-                this.subscribeToCollection(collection, baseCollection, recordId);
+            subscribe: async (recordId?: string) => {
+                await this.subscriptionManager.subscribe(collection, baseCollection, recordId);
             },
             unsubscribe: (recordId?: string) => {
-                this.unsubscribeFromCollection(collection, recordId);
+                this.subscriptionManager.unsubscribe(collection, recordId);
             },
             unsubscribeAll: () => {
-                this.unsubscribeAll(collection);
+                this.subscriptionManager.unsubscribeAll(collection);
             },
             isSubscribed: (recordId?: string) => {
-                return this.isSubscribed(collection, recordId);
-            }
+                return this.subscriptionManager.isSubscribed(collection, recordId);
+            },
+            waitForSubscription: async (recordId?: string, timeoutMs?: number) => {
+                await this.subscriptionManager.waitForSubscription(collection, recordId, timeoutMs);
+            },
+            relations: options?.relations || {} as RelationsConfig<Schema, C>
         });
 
-        // Automatically subscribe to collection-wide updates on creation
-        this.subscribeToCollection(collection, baseCollection);
+        // Automatically subscribe to collection-wide updates on creation (if enabled)
+        // Note: This runs asynchronously in the background - the collection is usable immediately
+        const enableSubscriptions = options?.enableSubscriptions !== false; // Default to true
+        if (enableSubscriptions) {
+            // Fire and forget - subscription establishes in background
+            this.subscriptionManager.subscribe(collection, baseCollection).catch(() => {
+                // Silently handle subscription errors - reconnection will be attempted
+            });
+        }
 
-        return subscribableCollection as Collection<RecordType> & SubscribableCollection<RecordType>;
+        return subscribableCollection as Collection<RecordType> & SubscribableCollection<RecordType> & JoinHelper<Schema, C, RecordType>;
     }
 }

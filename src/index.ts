@@ -8,10 +8,8 @@
  * @packageDocumentation
  */
 
-// Main factory class for creating collections
 export { CollectionFactory } from './collection';
 
-// React provider and hooks
 export {
     CollectionsProvider,
     useStore,
@@ -20,13 +18,10 @@ export {
     type CollectionsProviderProps,
 } from './provider';
 
-// Real-time subscription manager
 export { SubscriptionManager, SUBSCRIPTION_CONFIG } from './subscription-manager';
 
-// Logger configuration
 export { setLogger, resetLogger, type Logger } from './logger';
 
-// Type definitions
 export type {
     SchemaDeclaration,
     SubscribableCollection,

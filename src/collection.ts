@@ -12,7 +12,6 @@ import type {
     WithExpand,
 } from './types';
 
-// Re-export commonly used types for convenience
 export type {
     SchemaDeclaration,
     SubscribableCollection,
@@ -21,7 +20,6 @@ export type {
     RelationsConfig,
 } from './types';
 
-// Re-export React provider and hooks
 export {
     CollectionsProvider,
     useStore,
@@ -53,15 +51,12 @@ export class CollectionFactory<Schema extends SchemaDeclaration, TMaxDepth exten
             const newCount = event.subscriberCount;
             const previousCount = event.previousSubscriberCount;
 
-            // Subscriber added
             if (newCount > previousCount) {
                 // Fire and forget - subscription handled asynchronously
                 this.subscriptionManager.addSubscriber(collectionName, baseCollection).catch(() => {
                     // Silently handle subscription errors - reconnection will be attempted
                 });
-            }
-            // Subscriber removed
-            else if (newCount < previousCount) {
+            } else if (newCount < previousCount) {
                 this.subscriptionManager.removeSubscriber(collectionName);
             }
         });
@@ -167,20 +162,16 @@ export class CollectionFactory<Schema extends SchemaDeclaration, TMaxDepth exten
         const baseCollection = createCollection(
             queryCollectionOptions<RecordType>({
                 queryKey: [collection],
-                // No syncMode - use default behavior which auto-loads data
                 queryFn: async () => {
-                    // Build query options - conditionally add expand if provided
                     const queryOptions: { expand?: string } = {};
                     if (options?.expand) {
                         queryOptions.expand = options.expand;
                     }
 
-                    // Execute query against PocketBase - fetch all data
                     const result = await this.pocketbase
                         .collection(collection)
                         .getFullList(queryOptions);
 
-                    // Return the result with proper typing
                     return result as unknown as RecordType[];
                 },
                 queryClient: this.queryClient,
@@ -188,7 +179,6 @@ export class CollectionFactory<Schema extends SchemaDeclaration, TMaxDepth exten
             })
         );
 
-        // Enhance collection with subscription management methods and join helpers
         const subscribableCollection = Object.assign(baseCollection, {
             subscribe: async (recordId?: string) => {
                 await this.subscriptionManager.subscribe(collection, baseCollection, recordId);
@@ -208,7 +198,6 @@ export class CollectionFactory<Schema extends SchemaDeclaration, TMaxDepth exten
             relations: options?.relations || {} as RelationsConfig<Schema, C>
         });
 
-        // Setup automatic subscription lifecycle management
         this.setupSubscriptionLifecycle(collection, baseCollection);
 
         return subscribableCollection as Collection<RecordType> & SubscribableCollection<RecordType> & JoinHelper<Schema, C, RecordType>;

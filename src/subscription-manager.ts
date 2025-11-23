@@ -4,28 +4,13 @@ import type { Collection } from "@tanstack/db"
 import type { RealtimeEvent, SubscriptionState } from './types';
 import { logger } from './logger';
 
-/**
- * Subscription configuration constants.
- * Controls reconnection behavior and timing.
- */
 export const SUBSCRIPTION_CONFIG = {
-    /** Maximum number of reconnection attempts before giving up */
     MAX_RECONNECT_ATTEMPTS: 5,
-
-    /** Base delay in milliseconds for reconnection (uses exponential backoff) */
     BASE_RECONNECT_DELAY_MS: 1000,
-
-    /** Default timeout in milliseconds for waitForSubscription */
     DEFAULT_WAIT_TIMEOUT_MS: 5000,
-
-    /** Delay in milliseconds before unsubscribing after last query unmounts (prevents thrashing) */
     CLEANUP_DELAY_MS: 5000,
 } as const;
 
-/**
- * Type guard to check if a value has an 'id' field.
- * PocketBase records always include an id field.
- */
 function hasId(record: unknown): record is { id: string } {
     return typeof record === 'object'
         && record !== null
@@ -33,23 +18,15 @@ function hasId(record: unknown): record is { id: string } {
         && typeof (record as { id: unknown }).id === 'string';
 }
 
-/**
- * Creates a pending subscription state with default values.
- * Used when initializing subscriptions before they're fully established.
- */
 function createPendingSubscriptionState(recordId?: string): SubscriptionState {
     return {
-        unsubscribe: async () => { /* will be replaced */ },
+        unsubscribe: async () => {},
         recordId,
         reconnectAttempts: 0,
         isReconnecting: false,
     };
 }
 
-/**
- * Gets the subscription key for a given record ID.
- * Returns '*' for collection-wide subscriptions, or the specific record ID.
- */
 function getSubscriptionKey(recordId?: string): string {
     return recordId || '*';
 }
@@ -76,10 +53,6 @@ export class SubscriptionManager {
     // Internal Helpers
     // ============================================================================
 
-    /**
-     * Setup real-time subscription for a collection.
-     * Returns an unsubscribe function.
-     */
     private async setupSubscription<T extends object>(
         collectionName: string,
         collection: Collection<T>,
@@ -88,7 +61,6 @@ export class SubscriptionManager {
         const subscriptionKey = getSubscriptionKey(recordId);
 
         const eventHandler = (event: RealtimeEvent<T>) => {
-            // Use direct writes to sync changes to TanStack DB
             collection.utils.writeBatch(() => {
                 switch (event.action) {
                     case 'create':
@@ -98,7 +70,6 @@ export class SubscriptionManager {
                         collection.utils.writeUpdate(event.record);
                         break;
                     case 'delete':
-                        // Type guard to ensure record has id field
                         if (!hasId(event.record)) {
                             logger.error('Delete event record missing id field', {
                                 collectionName,
@@ -112,7 +83,6 @@ export class SubscriptionManager {
             });
         };
 
-        // Subscribe to PocketBase real-time updates
         const unsubscribe = await this.pocketbase
             .collection(collectionName)
             .subscribe(subscriptionKey, eventHandler);
@@ -122,10 +92,6 @@ export class SubscriptionManager {
         return unsubscribe;
     }
 
-    /**
-     * Handle reconnection with exponential backoff.
-     * Attempts to reestablish a failed subscription.
-     */
     private async handleReconnection<T extends object>(
         collectionName: string,
         collection: Collection<T>,
@@ -150,7 +116,6 @@ export class SubscriptionManager {
             await new Promise(resolve => setTimeout(resolve, delay));
 
             try {
-                // Attempt to resubscribe
                 const newUnsubscribe = await this.setupSubscription(
                     collectionName,
                     collection,
@@ -172,8 +137,7 @@ export class SubscriptionManager {
             }
         }
 
-        // Max attempts reached, give up
-        logger.error('Max reconnection attempts reached, giving up', {
+        logger.error('Max reconnection attempts reached', {
             collectionName,
             subscriptionKey,
             attempts: state.reconnectAttempts
@@ -210,58 +174,44 @@ export class SubscriptionManager {
         const collectionPromises = this.subscriptionPromises.get(collectionName)!;
         const subscriptionKey = getSubscriptionKey(recordId);
 
-        // Don't subscribe if already subscribed
         if (collectionSubs.has(subscriptionKey)) {
             logger.debug('Already subscribed, skipping', { collectionName, subscriptionKey });
             return;
         }
 
-        // If there's already a pending subscription promise, wait for it
         const existingPromise = collectionPromises.get(subscriptionKey);
         if (existingPromise) {
             logger.debug('Pending subscription found, waiting', { collectionName, subscriptionKey });
             return existingPromise;
         }
 
-        // Create a placeholder subscription state immediately (synchronous)
-        // This ensures isSubscribed() returns true right away
+        // Placeholder ensures isSubscribed() returns true immediately
         collectionSubs.set(subscriptionKey, createPendingSubscriptionState(recordId));
 
-        // Create the subscription promise
         const subscriptionPromise = (async () => {
             try {
-                // Setup subscription and wait for it to complete
                 const unsubscribe = await this.setupSubscription(collectionName, collection, recordId);
 
-                // Replace placeholder with actual unsubscribe function
                 const state = collectionSubs.get(subscriptionKey);
                 if (state) {
                     state.unsubscribe = unsubscribe;
                 }
             } catch (error) {
-                // Remove placeholder on error
                 collectionSubs.delete(subscriptionKey);
-                // Clean up promise on error
                 collectionPromises.delete(subscriptionKey);
                 logger.error('Subscription failed', { collectionName, subscriptionKey, error });
-                // Handle subscription error - try to reconnect
                 await this.handleReconnection(collectionName, collection, recordId);
-                throw error; // Re-throw so callers know it failed
+                throw error;
             }
-            // Note: We DON'T clean up the promise in finally - we keep it so
-            // waitForSubscription can check if subscription is complete
+            // Keep promise for waitForSubscription to check completion
         })();
 
-        // Store the promise so waitForSubscription can use it
         collectionPromises.set(subscriptionKey, subscriptionPromise);
 
-        // Wait for the promise to complete
         try {
             await subscriptionPromise;
-            // Successfully subscribed, keep the promise in the map
-            // It will be cleaned up when unsubscribing
         } catch (_error) {
-            // Error already handled above
+            // Error logged and reconnection initiated above
         }
     }
 
@@ -279,7 +229,6 @@ export class SubscriptionManager {
         const state = collectionSubs.get(subscriptionKey);
 
         if (state) {
-            // PocketBase unsubscribe returns a promise - handle it to avoid unhandled rejections
             const unsubPromise = state.unsubscribe();
             if (unsubPromise && typeof unsubPromise.catch === 'function') {
                 unsubPromise.catch((error) => {
@@ -294,7 +243,6 @@ export class SubscriptionManager {
             logger.debug('Unsubscribed', { collectionName, subscriptionKey });
         }
 
-        // Clean up the promise map
         const collectionPromises = this.subscriptionPromises.get(collectionName);
         if (collectionPromises) {
             collectionPromises.delete(subscriptionKey);
@@ -303,7 +251,6 @@ export class SubscriptionManager {
             }
         }
 
-        // Clean up collection map if empty
         if (collectionSubs.size === 0) {
             this.subscriptions.delete(collectionName);
         }
@@ -321,7 +268,6 @@ export class SubscriptionManager {
         logger.debug('Unsubscribing from all subscriptions', { collectionName, count: collectionSubs.size });
 
         for (const state of collectionSubs.values()) {
-            // PocketBase unsubscribe returns a promise - handle it to avoid unhandled rejections
             const unsubPromise = state.unsubscribe();
             if (unsubPromise && typeof unsubPromise.catch === 'function') {
                 unsubPromise.catch((error) => {
@@ -368,33 +314,26 @@ export class SubscriptionManager {
         timeoutMs: number = SUBSCRIPTION_CONFIG.DEFAULT_WAIT_TIMEOUT_MS
     ): Promise<void> {
         const subscriptionKey = getSubscriptionKey(recordId);
-
-        // Check if already subscribed (no pending promise)
         const collectionSubs = this.subscriptions.get(collectionName);
+
         if (collectionSubs?.has(subscriptionKey)) {
-            // Already subscribed, check if the promise is complete
             const collectionPromises = this.subscriptionPromises.get(collectionName);
             if (!collectionPromises?.has(subscriptionKey)) {
-                // No pending promise means subscription is complete
                 return;
             }
         }
 
-        // Get the pending promise
         const collectionPromises = this.subscriptionPromises.get(collectionName);
         const promise = collectionPromises?.get(subscriptionKey);
 
         if (!promise) {
-            // No subscription at all - this might be disabled
             const isSubscribed = collectionSubs?.has(subscriptionKey);
             if (!isSubscribed) {
-                throw new Error(`No subscription found for ${collectionName}:${subscriptionKey}. Did you disable auto-subscriptions?`);
+                throw new Error(`No subscription found for ${collectionName}:${subscriptionKey}`);
             }
-            // Subscribed but no promise (shouldn't happen, but handle gracefully)
             return;
         }
 
-        // Wait for the subscription promise with timeout
         const timeoutPromise = new Promise<void>((_, reject) => {
             setTimeout(() => reject(new Error(`Subscription timeout after ${timeoutMs}ms`)), timeoutMs);
         });
@@ -423,7 +362,6 @@ export class SubscriptionManager {
 
         logger.debug('Subscriber added', { collectionName, count: newCount });
 
-        // Cancel any pending cleanup
         const cleanupTimer = this.cleanupTimers.get(collectionName);
         if (cleanupTimer) {
             clearTimeout(cleanupTimer);
@@ -431,7 +369,6 @@ export class SubscriptionManager {
             logger.debug('Cleanup timer cancelled', { collectionName });
         }
 
-        // Subscribe when first subscriber is added
         if (newCount === 1 && !this.isSubscribed(collectionName)) {
             logger.debug('First subscriber - starting subscription', { collectionName });
             await this.subscribe(collectionName, collection);
@@ -451,17 +388,13 @@ export class SubscriptionManager {
 
         logger.debug('Subscriber removed', { collectionName, count: newCount });
 
-        // Schedule cleanup when last subscriber is removed
         if (newCount === 0) {
-            // Cancel any existing cleanup timer
             const existingTimer = this.cleanupTimers.get(collectionName);
             if (existingTimer) {
                 clearTimeout(existingTimer);
             }
 
-            // Schedule unsubscribe with delay to prevent thrashing
             const cleanupTimer = setTimeout(() => {
-                // Double-check subscriber count is still 0
                 const finalCount = this.subscriberCounts.get(collectionName) || 0;
                 if (finalCount === 0) {
                     logger.debug('Cleanup timer fired - unsubscribing', { collectionName });

@@ -12,7 +12,7 @@
     "lint": "biome check .",
     "lint:fix": "biome check . --write",
     "typecheck": "tsc  --noEmit --skipLibCheck",
-    "test": "start-server-and-test test:server:start http://127.0.0.1:8811/api/health test:run",
+    "test": "start-server-and-test test:server:start http://127.0.0.1:8210/api/health test:run",
     "test:run": "vitest",
     "test:server": "pocketbase serve --http http://localhost:1214",
     "test:server:start": "./scripts/start-test-server.sh",

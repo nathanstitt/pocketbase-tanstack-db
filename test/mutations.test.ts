@@ -480,9 +480,13 @@ describe('Collection - Mutations', () => {
             collection.delete(newBook.id)
         })
 
-        await new Promise((resolve) => setTimeout(resolve, 500))
+        await waitFor(
+            () => {
+                expect(result.current.data.length).toBe(initialCount)
+            },
+            { timeout: 5000 }
+        )
 
-        expect(result.current.data.length).toBe(initialCount)
         expect(result.current.data.find((b) => b.id === newBook.id)).toBeUndefined()
     })
 

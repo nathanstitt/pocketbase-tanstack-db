@@ -88,16 +88,20 @@ describe('Collection - Relations', () => {
         expect(authorName).toBeTypeOf('string')
     }, 15000)
 
-    it('should expand relations when specified in options', async () => {
+    it('should expand relations when specified with expandable', async () => {
         const factory = createCollectionFactory(queryClient)
-        // Type the expand as a literal to get proper type inference
+        const authorsCollection = factory.create('authors')
         const booksCollection = factory.create('books', {
-            expand: 'author' as const  // Type-safe: only valid relation fields allowed
+            expandable: {
+                author: authorsCollection
+            }
         })
+
+        const booksWithAuthor = booksCollection.expand(['author'] as const)
 
         const { result } = renderHook(() =>
             useLiveQuery((q) =>
-                q.from({ books: booksCollection })
+                q.from({ books: booksWithAuthor })
             )
         )
 
@@ -111,12 +115,9 @@ describe('Collection - Relations', () => {
         expect(result.current.data).toBeDefined()
         expect(result.current.data.length).toBeGreaterThan(0)
 
-        // The expand property should be properly typed (even if undefined for records without relations)
-        // This test validates type safety, not that data is actually expanded
         const firstBook = result.current.data[0]
 
         // Type checking: These should compile without errors
-        // The expand property exists in the type even if undefined at runtime
         expect(firstBook.expand).toBeDefined()
 
         const authorName: string | undefined = firstBook.expand?.author?.name
@@ -127,9 +128,14 @@ describe('Collection - Relations', () => {
 
     it('should filter on nested relation fields', async () => {
         const factory = createCollectionFactory(queryClient)
+        const authorsCollection = factory.create('authors')
         const booksCollection = factory.create('books', {
-            expand: 'author'
+            expandable: {
+                author: authorsCollection
+            }
         })
+
+        const booksWithAuthor = booksCollection.expand(['author'] as const)
 
         // Get an author ID to filter by
         const allBooks = await pb.collection('books').getList(1, 10, {
@@ -148,7 +154,7 @@ describe('Collection - Relations', () => {
 
         const { result } = renderHook(() =>
             useLiveQuery((q) =>
-                q.from({ books: booksCollection })
+                q.from({ books: booksWithAuthor })
                     .where(({ books }) => eq(books.author, testAuthorId))
             )
         )

@@ -7,9 +7,13 @@ import type {
     SchemaDeclaration,
     SubscribableCollection,
     JoinHelper,
+    ExpandableCollection,
     CreateCollectionOptions,
     RelationsConfig,
-    WithExpand,
+    WithExpandFromArray,
+    ExpandableConfig,
+    ExtractRecordType,
+    ExtractRelations,
 } from './types';
 
 export type {
@@ -93,13 +97,20 @@ export class CollectionFactory<Schema extends SchemaDeclaration, TMaxDepth exten
      * ```
      *
      * @example
-     * With relation expansion:
+     * With expandable relations (query-time expand):
      * ```ts
+     * const customersCollection = factory.create('customers');
      * const jobsCollection = factory.create('jobs', {
-     *     expand: 'customer,location'
+     *     expandable: {
+     *         customer: customersCollection
+     *     }
      * });
      *
-     * // Expanded relations available in record.expand
+     * // Choose what to expand per query
+     * const jobsWithCustomer = jobsCollection.expand(['customer'] as const);
+     * const { data } = useLiveQuery((q) => q.from({ jobs: jobsWithCustomer }));
+     * // Expanded records available in data[0].expand.customer
+     * // AND automatically inserted into customersCollection
      * ```
      *
      * @example
@@ -144,25 +155,31 @@ export class CollectionFactory<Schema extends SchemaDeclaration, TMaxDepth exten
      */
     create<
         C extends keyof Schema & string,
-        E extends string | undefined = undefined
+        Opts extends CreateCollectionOptions<Schema, C> = CreateCollectionOptions<Schema, C>
     >(
         collection: C,
-        options?: CreateCollectionOptions<Schema, C, E>
-    ): Collection<WithExpand<Schema, C, E>> & SubscribableCollection<WithExpand<Schema, C, E>> & JoinHelper<Schema, C, WithExpand<Schema, C, E>> {
-        type RecordType = WithExpand<Schema, C, E>;
+        options?: Opts
+    ): Collection<
+        ExtractRecordType<Schema, C>,
+        string | number,
+        any,
+        any,
+        Opts extends { omitOnInsert: infer O extends readonly (Exclude<keyof ExtractRecordType<Schema, C>, 'id'>)[] }
+            ? import('./types').ComputeInsertType<ExtractRecordType<Schema, C>, O>
+            : ExtractRecordType<Schema, C>
+    > &
+       SubscribableCollection<ExtractRecordType<Schema, C>> &
+       JoinHelper<Schema, C, ExtractRecordType<Schema, C>> &
+       ExpandableCollection<Schema, C, ExtractRecordType<Schema, C>> {
+        type RecordType = ExtractRecordType<Schema, C>;
 
         const baseCollection = createCollection(
             queryCollectionOptions<RecordType>({
                 queryKey: [collection],
                 queryFn: async () => {
-                    const queryOptions: { expand?: string } = {};
-                    if (options?.expand) {
-                        queryOptions.expand = options.expand;
-                    }
-
                     const result = await this.pocketbase
                         .collection(collection)
-                        .getFullList(queryOptions);
+                        .getFullList();
 
                     return result as unknown as RecordType[];
                 },
@@ -215,11 +232,82 @@ export class CollectionFactory<Schema extends SchemaDeclaration, TMaxDepth exten
             waitForSubscription: async (recordId?: string, timeoutMs?: number) => {
                 await this.subscriptionManager.waitForSubscription(collection, recordId, timeoutMs);
             },
-            relations: options?.relations || {} as RelationsConfig<Schema, C>
+            relations: options?.relations || {} as RelationsConfig<Schema, C>,
+            expand: <Fields extends readonly (keyof ExtractRelations<Schema, C> & string)[]>(
+                fields: Fields
+            ): Collection<WithExpandFromArray<RecordType, Schema, C, Fields>> => {
+                if (!options?.expandable) {
+                    throw new Error(
+                        `Collection '${collection}' does not have expandable config. ` +
+                        `Add 'expandable' option when creating the collection.`
+                    );
+                }
+
+                const expandableConfig = options.expandable;
+                const sortedFields = [...fields].sort();
+                const expandString = sortedFields.join(',');
+
+                for (const field of fields) {
+                    if (!(field in expandableConfig)) {
+                        throw new Error(
+                            `Field '${String(field)}' is not in expandable config for collection '${collection}'. ` +
+                            `Available fields: ${Object.keys(expandableConfig).join(', ')}`
+                        );
+                    }
+                }
+
+                type ExpandedRecordType = WithExpandFromArray<RecordType, Schema, C, Fields>;
+
+                const expandedCollection = createCollection(
+                    queryCollectionOptions<ExpandedRecordType>({
+                        queryKey: [collection, { expand: expandString }],
+                        queryFn: async () => {
+                            const records = await this.pocketbase
+                                .collection(collection)
+                                .getFullList({ expand: expandString });
+
+                            for (const record of records) {
+                                const typedRecord = record as unknown as ExpandedRecordType;
+                                if (typedRecord.expand) {
+                                    for (const field of fields) {
+                                        const expandedData = typedRecord.expand[field as keyof typeof typedRecord.expand];
+                                        const targetCollection = expandableConfig[field];
+
+                                        if (!expandedData || !targetCollection) continue;
+
+                                        try {
+                                            if (Array.isArray(expandedData)) {
+                                                for (const item of expandedData) {
+                                                    targetCollection.utils.writeInsert(item);
+                                                }
+                                            } else {
+                                                targetCollection.utils.writeInsert(expandedData);
+                                            }
+                                        } catch (error) {
+                                            // Silently ignore sync initialization errors
+                                            // Target collection may not be ready yet
+                                            if (error instanceof Error && !error.message.includes('Sync not initialized')) {
+                                                throw error;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            return records as unknown as ExpandedRecordType[];
+                        },
+                        queryClient: this.queryClient,
+                        getKey: (item: ExpandedRecordType) => (item as { id: string }).id,
+                        startSync: options?.startSync ?? false,
+                    })
+                );
+
+                return expandedCollection as any;
+            }
         });
 
         this.setupSubscriptionLifecycle(collection, baseCollection);
 
-        return subscribableCollection as Collection<RecordType> & SubscribableCollection<RecordType> & JoinHelper<Schema, C, RecordType>;
+        return subscribableCollection as any;
     }
 }

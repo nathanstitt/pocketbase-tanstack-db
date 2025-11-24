@@ -5,6 +5,7 @@ import { eq } from '@tanstack/db'
 import type { QueryClient } from '@tanstack/react-query';
 
 import { createReactCollections, defineCollection } from '../src/react';
+import { CollectionFactory } from '../src/collection';
 import type { Schema } from './schema';
 import { pb, createTestQueryClient, authenticateTestUser, clearAuth, getTestAuthorId } from './helpers';
 
@@ -212,6 +213,60 @@ describe('createReactCollections', () => {
 
             expect(result.current).toBeDefined();
         });
+
+        it('should support expandable collections within provider context', async () => {
+            // Create a factory to set up collections with expandable
+            const factory = new CollectionFactory<Schema>(pb, queryClient);
+            const authorsCollection = factory.create('authors');
+            const booksCollection = factory.create('books', {
+                expandable: {
+                    author: authorsCollection
+                },
+            });
+
+            const { Provider, useStore } = createReactCollections<Schema>(pb, queryClient)({
+                authors: defineCollection('authors', {}),
+                books: defineCollection('books', {}),
+            });
+
+            const authorId = await getTestAuthorId();
+            const { result } = renderHook(
+                () => {
+                    // Use the expandable collection with expand
+                    const expandedBooks = booksCollection.expand(['author'] as const);
+
+                    return useLiveQuery((q) =>
+                        q.from({ books: expandedBooks })
+                            .where(({ books }) => eq(books.author, authorId))
+                    );
+                },
+                { wrapper: ({ children }) => <Provider>{children}</Provider> }
+            );
+
+            await waitFor(
+                () => {
+                    expect(result.current.isLoading).toBe(false);
+                },
+                { timeout: 10000 }
+            );
+
+            expect(result.current.data).toBeDefined();
+            expect(Array.isArray(result.current.data)).toBe(true);
+
+            if (result.current.data && result.current.data.length > 0) {
+                const book = result.current.data[0];
+                expect(book).toBeDefined();
+                expect(book.author).toBe(authorId);
+
+                // Check that expand property exists and contains author data
+                if (book.expand?.author) {
+                    expect(book.expand.author).toBeDefined();
+                    expect(book.expand.author.id).toBe(authorId);
+                    expect(book.expand.author.name).toBeTypeOf('string');
+                    expect(book.expand.author.email).toBeTypeOf('string');
+                }
+            }
+        }, 15000);
     });
 
 });

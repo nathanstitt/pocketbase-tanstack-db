@@ -131,6 +131,50 @@ export interface JoinHelper<
     relations: RelationsConfig<Schema, CollectionName>;
 }
 
+/**
+ * Enhanced collection interface with query-time expand capabilities.
+ * Allows selecting which relations to expand per-query with automatic insertion into target collections.
+ */
+export interface ExpandableCollection<
+    Schema extends SchemaDeclaration,
+    CollectionName extends keyof Schema,
+    RecordType extends object
+> {
+    /**
+     * Create a collection variant with specified relations expanded.
+     * The expanded records are automatically inserted into their target collections.
+     *
+     * @param fields - Array of relation field names to expand (must be defined in expandable config)
+     * @returns A collection variant with the specified fields expanded
+     *
+     * @example
+     * ```ts
+     * const jobsCollection = factory.create('jobs', {
+     *     expandable: {
+     *         customer: customersCollection,
+     *         address: addressesCollection,
+     *         tags: tagsCollection
+     *     }
+     * });
+     *
+     * // Expand only customer
+     * const { data } = useLiveQuery((q) =>
+     *     q.from({ jobs: jobsCollection.expand(['customer'] as const) })
+     * );
+     * // data[0].expand.customer is typed and available
+     * // customersCollection also contains the expanded customer records
+     *
+     * // Expand multiple relations
+     * const { data: detailed } = useLiveQuery((q) =>
+     *     q.from({ jobs: jobsCollection.expand(['customer', 'address'] as const) })
+     * );
+     * ```
+     */
+    expand<Fields extends readonly (keyof ExtractRelations<Schema, CollectionName> & string)[]>(
+        fields: Fields
+    ): Collection<WithExpandFromArray<RecordType, Schema, CollectionName, Fields>>;
+}
+
 // ============================================================================
 // Schema Extraction Utilities
 // ============================================================================
@@ -143,6 +187,24 @@ export type ExtractRecordType<
     Schema extends SchemaDeclaration,
     CollectionName extends keyof Schema
 > = Schema[CollectionName]['type'];
+
+/**
+ * Computes the insert input type by making specified fields optional.
+ * Used to support omitting server-generated fields (created, updated) during insertion.
+ *
+ * IMPORTANT: The 'id' field can NEVER be omitted as TanStack DB requires it for record tracking.
+ *
+ * @example
+ * ```ts
+ * type BookInsert = ComputeInsertType<Books, ['created', 'updated']>
+ * // Result: Omit<Books, 'created' | 'updated'> & Partial<Pick<Books, 'created' | 'updated'>>
+ * ```
+ * @internal
+ */
+export type ComputeInsertType<
+    T extends object,
+    OmitFields extends readonly (Exclude<keyof T, 'id'>)[]
+> = Omit<T, OmitFields[number]> & Partial<Pick<T, OmitFields[number]>>;
 
 /**
  * Extracts the relations object from a schema collection.
@@ -214,6 +276,36 @@ export type WithExpand<
     }
     : ExtractRecordType<Schema, CollectionName>;
 
+/**
+ * Builds the expand object type based on an array of field names.
+ * Used for query-time expand where fields are specified as an array.
+ *
+ * @example
+ * ```ts
+ * WithExpandFromArray<JobRecord, Schema, 'jobs', ['customer', 'address']> => JobRecord & {
+ *     expand?: {
+ *         customer?: CustomerRecord;
+ *         address?: AddressRecord;
+ *     }
+ * }
+ * ```
+ * @internal
+ */
+export type WithExpandFromArray<
+    T extends object,
+    Schema extends SchemaDeclaration,
+    CollectionName extends keyof Schema,
+    Fields extends readonly string[]
+> = T & {
+    expand?: {
+        [K in Fields[number]]: K extends keyof ExtractRelations<Schema, CollectionName>
+            ? ExtractRelations<Schema, CollectionName>[K] extends Array<infer U>
+                ? U[]  // Array relation
+                : ExtractRelations<Schema, CollectionName>[K]  // Single relation
+            : never;
+    };
+};
+
 // ============================================================================
 // Relation Type Utilities
 // ============================================================================
@@ -265,17 +357,40 @@ export type RelationsConfig<
         >;
     }>;
 
+/**
+ * Configuration for expandable relations - maps relation field names to their target collections.
+ * Used to define which relations CAN be expanded at query time with auto-insertion into target collections.
+ *
+ * @example
+ * ```ts
+ * const config: ExpandableConfig<Schema, 'jobs'> = {
+ *     customer: customersCollection,
+ *     address: addressesCollection,
+ *     tags: tagsCollection
+ * };
+ * ```
+ */
+export type ExpandableConfig<
+    Schema extends SchemaDeclaration,
+    CollectionName extends keyof Schema
+> = ExtractRelations<Schema, CollectionName> extends never
+    ? Record<string, never>
+    : Partial<{
+        [K in keyof ExtractRelations<Schema, CollectionName>]: RelationAsCollection<
+            NonNullable<ExtractRelations<Schema, CollectionName>[K]>
+        >;
+    }>;
+
 // ============================================================================
 // Configuration Options
 // ============================================================================
 
 /**
- * Options for creating a collection with optional expand and relations.
+ * Options for creating a collection with optional expandable and relations.
  */
 export interface CreateCollectionOptions<
     Schema extends SchemaDeclaration,
-    CollectionName extends keyof Schema,
-    Expand extends string | undefined = undefined
+    CollectionName extends keyof Schema
 > {
     /**
      * Pre-configured relation collections for manual TanStack DB joins.
@@ -293,24 +408,32 @@ export interface CreateCollectionOptions<
     relations?: RelationsConfig<Schema, CollectionName>;
 
     /**
-     * Relation fields to auto-expand from PocketBase.
-     * Can be a single field or comma-separated list.
-     * For best type inference, use `as const` when providing comma-separated strings.
+     * Define which relations CAN be expanded at query time.
+     * Maps relation field names to their target collections for auto-insertion.
+     *
+     * When specified, enables the `.expand()` method on the collection that allows
+     * query-time selection of which relations to expand. Expanded records are
+     * automatically inserted into their target collections.
      *
      * @example
      * ```ts
-     * // Single relation
+     * const customersCollection = factory.create('customers');
+     * const addressesCollection = factory.create('addresses');
+     *
      * const jobsCollection = factory.create('jobs', {
-     *     expand: 'customer'  // Type inference works automatically
+     *     expandable: {
+     *         customer: customersCollection,
+     *         address: addressesCollection
+     *     }
      * });
      *
-     * // Multiple relations with type inference
-     * const jobsCollection = factory.create('jobs', {
-     *     expand: 'customer,address' as const  // `as const` gives proper typing
-     * });
+     * // In query - choose which to expand
+     * const { data } = useLiveQuery((q) =>
+     *     q.from({ jobs: jobsCollection.expand(['customer'] as const) })
+     * );
      * ```
      */
-    expand?: Expand;
+    expandable?: ExpandableConfig<Schema, CollectionName>;
 
     /**
      * Whether to automatically sync (fetch) data when the collection is created.
@@ -330,6 +453,36 @@ export interface CreateCollectionOptions<
      * ```
      */
     startSync?: boolean;
+
+    /**
+     * Fields that can be omitted during insert operations.
+     * Useful for server-generated fields like 'created', 'updated'.
+     *
+     * When specified, the insert() method will accept records without these fields,
+     * and the omitted fields become optional in the insert input type.
+     *
+     * **Type safety:** Only valid field names from the record type are accepted.
+     * **IMPORTANT:** The 'id' field can NEVER be omitted as TanStack DB requires it.
+     *
+     * @example
+     * ```ts
+     * // Allow inserting without created, updated (server-generated timestamps)
+     * const booksCollection = factory.create('books', {
+     *     omitOnInsert: ['created', 'updated'] as const
+     * });
+     *
+     * // Now insert() accepts records without those fields
+     * booksCollection.insert({
+     *     id: newRecordId(),  // id is always required
+     *     title: 'New Book',
+     *     isbn: '1234567890',
+     *     genre: 'Fiction',
+     *     author: authorId
+     *     // created, updated are optional
+     * });
+     * ```
+     */
+    omitOnInsert?: readonly (Exclude<keyof ExtractRecordType<Schema, CollectionName>, 'id'>)[];
 
     /**
      * Custom handler for insert mutations.
@@ -362,7 +515,7 @@ export interface CreateCollectionOptions<
      * });
      * ```
      */
-    onInsert?: InsertMutationFn<WithExpand<Schema, CollectionName, Expand>> | false;
+    onInsert?: InsertMutationFn<ExtractRecordType<Schema, CollectionName>> | false;
 
     /**
      * Custom handler for update mutations.
@@ -395,7 +548,7 @@ export interface CreateCollectionOptions<
      * });
      * ```
      */
-    onUpdate?: UpdateMutationFn<WithExpand<Schema, CollectionName, Expand>> | false;
+    onUpdate?: UpdateMutationFn<ExtractRecordType<Schema, CollectionName>> | false;
 
     /**
      * Custom handler for delete mutations.
@@ -427,5 +580,5 @@ export interface CreateCollectionOptions<
      * });
      * ```
      */
-    onDelete?: DeleteMutationFn<WithExpand<Schema, CollectionName, Expand>> | false;
+    onDelete?: DeleteMutationFn<ExtractRecordType<Schema, CollectionName>> | false;
 }

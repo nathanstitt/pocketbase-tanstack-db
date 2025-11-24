@@ -523,6 +523,37 @@ const filtered = await pb.collection('jobs')
 - Use `expand` parameter to populate related records
 - Expanded data appears in `record.expand` object
 
+**4. Inserting Records with Omittable Fields:**
+
+When inserting records, you often want to omit server-generated fields like `id`, `created`, and `updated`. Use the `omitOnInsert` option to make these fields optional in the insert type:
+
+```typescript
+const booksCollection = factory.create('books', {
+    omitOnInsert: ['created', 'updated'] as const
+});
+
+// Now you can insert without created/updated fields
+const tx = booksCollection.insert({
+    id: newRecordId(),  // Required for optimistic tracking
+    title: 'New Book',
+    isbn: '1234567890',
+    genre: 'Fiction',
+    author: authorId,
+    published_date: '2025-01-01',
+    page_count: 300
+    // created and updated are omitted - PocketBase will generate them
+});
+
+await tx.isPersisted.promise;
+```
+
+**Key Points:**
+- Fields in `omitOnInsert` become optional in the insert operation
+- The `id` field should typically NOT be omitted, as TanStack DB needs it for optimistic tracking
+- Server-generated fields (`created`, `updated`) are automatically added by PocketBase
+- Omitted fields are stripped out before sending to PocketBase (see `onInsert` handler)
+- TypeScript enforces type safety: only valid field names are accepted in `omitOnInsert`
+
 ### Integration with React Query
 
 **Query Keys:**
@@ -601,6 +632,45 @@ function BooksList() {
             ))}
         </ul>
     );
+}
+```
+
+#### Using omitOnInsert with React Collections
+
+You can specify omittable fields when defining collections:
+
+```typescript
+const { Provider, useStore } = createReactCollections<MySchema>(pb, queryClient)({
+    books: defineCollection('books', {
+        omitOnInsert: ['created', 'updated'] as const,
+        expand: 'author' as const
+    }),
+    authors: defineCollection('authors', {
+        omitOnInsert: ['created', 'updated'] as const
+    }),
+});
+
+// In your component
+function AddBook() {
+    const books = useStore('books');
+
+    const handleAddBook = async (authorId: string) => {
+        // Insert without created/updated - they're optional now!
+        const tx = books.insert({
+            id: newRecordId(),
+            title: 'New Book',
+            isbn: '1234567890',
+            genre: 'Fiction',
+            author: authorId,
+            published_date: '2025-01-01',
+            page_count: 300
+            // created and updated omitted - PocketBase generates them
+        });
+
+        await tx.isPersisted.promise;
+    };
+
+    return <button onClick={() => handleAddBook(someAuthorId)}>Add Book</button>;
 }
 ```
 

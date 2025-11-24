@@ -37,7 +37,9 @@ describe('Collection - Mutations', () => {
 
     it('should support insert mutations with automatic PocketBase sync', async () => {
         const factory = createCollectionFactory(queryClient)
-        const collection = factory.create('books')
+        const collection = factory.create('books', {
+            omitOnInsert: ['created', 'updated'] as const
+        })
 
         const { result } = renderHook(() => useLiveQuery((q) => q.from({ books: collection })))
 
@@ -51,16 +53,14 @@ describe('Collection - Mutations', () => {
         const initialCount = result.current.data.length
 
         const authorId = await getTestAuthorId()
-        const newBook: Books = {
+        const newBook = {
             id: newRecordId(),
             title: `Mutation Insert Test ${Date.now().toString().slice(-8)}`,
-            genre: 'Fiction',
+            genre: 'Fiction' as const,
             isbn: getTestSlug('ins'),
             author: authorId,
             published_date: '',
             page_count: 0,
-            created: new Date().toISOString(),
-            updated: new Date().toISOString(),
         }
 
         const tx = collection.insert(newBook)
@@ -85,6 +85,54 @@ describe('Collection - Mutations', () => {
         try {
             const books = await pb.collection('books').getFullList({ filter: `isbn = "${newBook.isbn}"` })
             expect(books.length).toBeGreaterThan(0)
+            await pb.collection('books').delete(books[0].id)
+        } catch (_error) {
+            // Ignore cleanup errors
+        }
+    })
+
+    it('should support omitOnInsert configuration for optional server-generated fields', async () => {
+        const factory = createCollectionFactory(queryClient)
+        const collection = factory.create('books', {
+            omitOnInsert: ['created', 'updated'] as const
+        })
+
+        const { result } = renderHook(() => useLiveQuery((q) => q.from({ books: collection })))
+
+        await waitFor(
+            () => {
+                expect(result.current.isLoading).toBe(false)
+            },
+            { timeout: 5000 }
+        )
+
+        const authorId = await getTestAuthorId()
+        const newBook = {
+            id: newRecordId(),
+            title: `OmitOnInsert Test ${Date.now().toString().slice(-8)}`,
+            genre: 'Science Fiction' as const,
+            isbn: getTestSlug('omi'),
+            author: authorId,
+            published_date: '2025-01-01',
+            page_count: 250,
+        }
+
+        const tx = collection.insert(newBook)
+        await tx.isPersisted.promise
+
+        expect(tx.state).toBe('completed')
+
+        const insertedBook = result.current.data.find((b) => b.isbn === newBook.isbn)
+        expect(insertedBook).toBeDefined()
+        expect(insertedBook?.created).toBeDefined()
+        expect(insertedBook?.updated).toBeDefined()
+        expect(insertedBook?.title).toBe(newBook.title)
+
+        try {
+            const books = await pb.collection('books').getFullList({ filter: `isbn = "${newBook.isbn}"` })
+            expect(books.length).toBeGreaterThan(0)
+            expect(books[0].created).toBeDefined()
+            expect(books[0].updated).toBeDefined()
             await pb.collection('books').delete(books[0].id)
         } catch (_error) {
             // Ignore cleanup errors

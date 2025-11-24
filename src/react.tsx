@@ -8,7 +8,8 @@ import type {
     CreateCollectionOptions,
     SubscribableCollection,
     JoinHelper,
-    WithExpand,
+    ExpandableCollection,
+    ExtractRecordType,
 } from './types';
 
 /**
@@ -17,9 +18,8 @@ import type {
  */
 export type CollectionConfig<
     Schema extends SchemaDeclaration,
-    CollectionName extends keyof Schema,
-    Expand extends string | undefined = undefined
-> = CreateCollectionOptions<Schema, CollectionName, Expand> & {
+    CollectionName extends keyof Schema
+> = CreateCollectionOptions<Schema, CollectionName> & {
     _collectionName: CollectionName;
     collection?: CollectionName;
 };
@@ -35,9 +35,10 @@ export type CollectionConfig<
  *
  * @example
  * ```typescript
+ * const authorsCollection = factory.create('authors');
  * const { Provider, useStore } = createReactCollections<Schema>(pb, queryClient, {
  *     books: defineCollection('books', {
- *         expand: 'author' as const
+ *         expandable: { author: authorsCollection }
  *     }),
  *     authors: defineCollection('authors', {}),
  * });
@@ -45,17 +46,16 @@ export type CollectionConfig<
  */
 export function defineCollection<
     Schema extends SchemaDeclaration,
-    K extends keyof Schema & string,
-    E extends string | undefined = undefined
+    K extends keyof Schema & string
 >(
     collection: K,
-    options?: Omit<CreateCollectionOptions<Schema, K, E>, 'collection'>
-): CollectionConfig<Schema, K, E> {
+    options?: Omit<CreateCollectionOptions<Schema, K>, 'collection'>
+): CollectionConfig<Schema, K> {
     return {
         ...options,
         collection,
         _collectionName: collection,
-    } as CollectionConfig<Schema, K, E>;
+    } as CollectionConfig<Schema, K>;
 }
 
 /**
@@ -65,7 +65,7 @@ export type CollectionsConfig<Schema extends SchemaDeclaration> = Record<
     string,
     {
         _collectionName: keyof Schema & string;
-    } & CollectionConfig<Schema, any, any>
+    } & CollectionConfig<Schema, any>
 >;
 
 /**
@@ -75,9 +75,12 @@ export type CollectionsConfig<Schema extends SchemaDeclaration> = Record<
 type InferCollectionType<
     Schema extends SchemaDeclaration,
     Config extends { _collectionName: keyof Schema }
-> = Config extends { _collectionName: infer C } & CollectionConfig<Schema, any, infer E>
+> = Config extends { _collectionName: infer C } & CollectionConfig<Schema, any>
     ? C extends keyof Schema
-        ? Collection<WithExpand<Schema, C, E>> & SubscribableCollection<WithExpand<Schema, C, E>> & JoinHelper<Schema, C, WithExpand<Schema, C, E>>
+        ? Collection<ExtractRecordType<Schema, C>> &
+          SubscribableCollection<ExtractRecordType<Schema, C>> &
+          JoinHelper<Schema, C, ExtractRecordType<Schema, C>> &
+          ExpandableCollection<Schema, C, ExtractRecordType<Schema, C>>
         : never
     : never;
 

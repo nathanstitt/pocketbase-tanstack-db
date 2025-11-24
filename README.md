@@ -110,9 +110,7 @@ const queryClient = new QueryClient({
 // Create typed collections - automatic type inference!
 const { Provider, useStore } = createReactCollections<MySchema>(pb, queryClient)({
     authors: defineCollection('authors', {}),
-    books: defineCollection('books', {
-        expand: 'author' as const  // Type-safe expand
-    }),
+    books: defineCollection('books', {}),
 });
 
 // Wrap your app
@@ -131,12 +129,21 @@ function App() {
 
 ```typescript
 import { useLiveQuery } from '@tanstack/react-db';
+import { CollectionFactory } from 'pocketbase-tanstack-db';
+
+// Initialize factory (once per app)
+const factory = new CollectionFactory<MySchema>(pb, queryClient);
 
 function BooksList() {
-    const books = useStore('books');  // ✅ Fully typed!
+    const [books, authors] = useStore('books', 'authors');  // ✅ Fully typed!
+
+    // Create expandable relationship
+    const booksWithAuthor = factory.create('books', {
+        expandable: { author: authors }
+    }).expand(['author'] as const);
 
     const { data, isLoading } = useLiveQuery((q) =>
-        q.from({ books })
+        q.from({ books: booksWithAuthor })
     );
 
     if (isLoading) return <div>Loading...</div>;
@@ -242,7 +249,7 @@ create<CollectionName>(
 ```
 
 **Options:**
-- `expand?: string` - Relations to expand (e.g., `'author,metadata'`)
+- `expandable?: Record<string, Collection>` - Relations that CAN be expanded at query-time with `.expand()`
 - `relations?: Record<string, Collection>` - Collections for manual joins
 - `startSync?: boolean` - Start syncing immediately (default: `false`, lazy)
 - `onInsert?: InsertMutationFn | false` - Custom insert handler or `false` to disable
@@ -256,17 +263,6 @@ Basic collection (lazy, subscribes automatically on first query):
 const booksCollection = factory.create('books');
 ```
 
-With expand:
-```typescript
-const booksCollection = factory.create('books', {
-    expand: 'author' as const // Type-safe expand
-});
-
-// Expanded relations available
-const { data } = useLiveQuery((q) => q.from({ books: booksCollection }));
-data[0].expand?.author // ✅ Typed!
-```
-
 With relations for joins:
 ```typescript
 const authorsCollection = factory.create('authors');
@@ -275,6 +271,22 @@ const booksCollection = factory.create('books', {
         author: authorsCollection
     }
 });
+```
+
+With query-time expand (advanced):
+```typescript
+const authorsCollection = factory.create('authors');
+const booksCollection = factory.create('books', {
+    expandable: {
+        author: authorsCollection  // Can be expanded per-query
+    }
+});
+
+// Use .expand() method to choose which relations to expand
+const booksWithAuthor = booksCollection.expand(['author'] as const);
+const { data } = useLiveQuery((q) => q.from({ books: booksWithAuthor }));
+
+// Expanded records auto-inserted into authorsCollection
 ```
 
 ### React Integration
@@ -306,9 +318,7 @@ import { createReactCollections, defineCollection } from 'pocketbase-tanstack-db
 
 const { Provider, useStore } = createReactCollections<MySchema>(pb, queryClient)({
     authors: defineCollection('authors', {}),
-    books: defineCollection('books', {
-        expand: 'author' as const
-    }),
+    books: defineCollection('books', {}),
 });
 
 // Wrap your app
@@ -321,7 +331,6 @@ const { Provider, useStore } = createReactCollections<MySchema>(pb, queryClient)
 ```typescript
 const { Provider, useStore } = createReactCollections<MySchema>(pb, queryClient)({
     myBooks: defineCollection('books', {  // Key 'myBooks', collection 'books'
-        expand: 'author' as const
     })
 });
 
@@ -573,40 +582,73 @@ const { data } = useLiveQuery((q) =>
 
 ### Relations and Joins
 
-#### Type-Safe Expand (Recommended)
+#### Query-Time Expand
 
-Use PocketBase's built-in expand for fast, server-side joins:
+Choose which relations to expand per-query with automatic insertion into target collections:
 
 ```typescript
-// Create collection with expand
+// Define which relations CAN be expanded
+const authorsCollection = factory.create('authors');
+const metadataCollection = factory.create('book_metadata');
+
 const booksCollection = factory.create('books', {
-    expand: 'author' as const // ← Type-safe!
-});
-
-// Use in query
-const { data } = useLiveQuery((q) =>
-    q.from({ books: booksCollection })
-);
-
-// Access expanded relations (fully typed!)
-data?.forEach(book => {
-    if (book.expand?.author) {
-        console.log(book.expand.author.name); // ✅ Type-safe
+    expandable: {
+        author: authorsCollection,
+        metadata: metadataCollection
     }
 });
+
+// Query 1: Expand only author
+const { data: booksWithAuthor } = useLiveQuery((q) =>
+    q.from({ books: booksCollection.expand(['author'] as const) })
+);
+
+// Query 2: Expand both author and metadata
+const { data: booksWithAll } = useLiveQuery((q) =>
+    q.from({ books: booksCollection.expand(['author', 'metadata'] as const) })
+);
+
+// Query 3: No expand (base collection)
+const { data: booksOnly } = useLiveQuery((q) =>
+    q.from({ books: booksCollection })
+);
 ```
 
-#### Multiple Expands
+**Benefits:**
+- ✅ Choose expand fields per-query instead of per-collection
+- ✅ Expanded records automatically inserted into their target collections
+- ✅ Full type safety - TypeScript knows which fields are expanded
+- ✅ Efficient caching - different expand combinations cached separately
+
+**Example with auto-insertion:**
 
 ```typescript
+const authorsCollection = factory.create('authors');
 const booksCollection = factory.create('books', {
-    expand: 'author,metadata' as const
+    expandable: {
+        author: authorsCollection
+    }
 });
 
-// Both relations expanded
-data[0].expand?.author   // ✅ Author type
-data[0].expand?.metadata // ✅ Metadata type
+// Fetch books with author expanded
+const { data: books } = useLiveQuery((q) =>
+    q.from({ books: booksCollection.expand(['author'] as const) })
+);
+
+// Fetch all authors separately
+const { data: authors } = useLiveQuery((q) =>
+    q.from({ authors: authorsCollection })
+);
+
+// The expanded author from books is automatically available in authorsCollection!
+// Both queries share the same author data
+books[0].expand?.author?.name === authors.find(a => a.id === books[0].author)?.name // ✅ true
 ```
+
+**When to use:**
+- Different queries need different expand combinations
+- You want expanded records to populate their own collections automatically
+- Building dashboards with varying detail levels
 
 #### TanStack DB Joins
 
@@ -960,11 +1002,16 @@ booksCollection.insert(newBook); // ❌ Error: Inserts disabled
 Mutations work seamlessly with expanded relations:
 
 ```typescript
+const authorsCollection = factory.create('authors');
 const booksCollection = factory.create('books', {
-    expand: 'author' as const
+    expandable: {
+        author: authorsCollection
+    }
 });
 
-// Insert includes expanded relation
+const booksWithAuthor = booksCollection.expand(['author'] as const);
+
+// Insert a new book
 const newBook = {
     id: newRecordId(),
     title: 'New Book',
@@ -972,9 +1019,9 @@ const newBook = {
     // ... other fields
 };
 
-booksCollection.insert(newBook);
+booksWithAuthor.insert(newBook);
 
-// After sync, the collection will re-fetch with expand
+// After sync, the expanded collection will re-fetch with expand
 // so the new book will have book.expand.author populated
 ```
 
@@ -1069,15 +1116,24 @@ interface BlogSchema extends SchemaDeclaration {
 
 ### Type-Safe Expand
 
-Use `as const` for type-safe expand strings:
+Use `as const` with the `.expand()` method for type-safe field selection:
 
 ```typescript
+const authorsCollection = factory.create('authors');
+const tagsCollection = factory.create('tags');
+
 const postsCollection = factory.create('posts', {
-    expand: 'author,tags' as const
-    // ✅ TypeScript validates these are real relations
+    expandable: {
+        author: authorsCollection,
+        tags: tagsCollection
+    }
 });
 
-// Expanded fields are typed
+// Choose which relations to expand with type safety
+const postsWithRelations = postsCollection.expand(['author', 'tags'] as const);
+// ✅ TypeScript validates these are real relations
+
+// Expanded fields are fully typed
 data[0].expand?.author.username  // ✅ string
 data[0].expand?.tags[0].name     // ✅ string
 ```
@@ -1086,24 +1142,28 @@ data[0].expand?.tags[0].name     // ✅ string
 
 ### 1. Choose the Right Approach for Relations
 
-**Use Type-Safe Expand when:**
+**Use Query-Time Expand when:**
 - You need fast, single-query performance
-- Relations are straightforward
-
+- Different queries need different expand combinations
+- You want expanded records auto-inserted into their collections
 
 ```typescript
-// ✅ Fast, simple, type-safe
-const books = factory.create('books', {
-    expand: 'author' as const
+// ✅ Fast, flexible, type-safe
+const authorsCollection = factory.create('authors');
+const booksCollection = factory.create('books', {
+    expandable: {
+        author: authorsCollection
+    }
 });
+
+// Choose what to expand per query
+const booksWithAuthor = booksCollection.expand(['author'] as const);
 ```
 
 **Use TanStack Joins when:**
 - You need inner/right/full joins
-- You want the related records to update in response to sync
 - Complex client-side filtering after joins
 - Building computed fields from multiple collections
-
 
 ```typescript
 // ✅ Flexible, powerful, type-safe
@@ -1118,7 +1178,7 @@ const { data } = useLiveQuery((q) =>
 ```typescript
 // ✅ Define collections once with automatic type inference
 const { Provider, useStore } = createReactCollections<MySchema>(pb, queryClient)({
-    books: defineCollection('books', { expand: 'author' as const }),
+    books: defineCollection('books', {}),
     authors: defineCollection('authors', {}),
 });
 

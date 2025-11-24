@@ -8,14 +8,11 @@
  * @packageDocumentation
  */
 
-export { CollectionFactory } from './collection';
+export { createCollection, createCollections, type CollectionsConfig, type InferCollectionsMap } from './collection';
 
 export {
-    createReactCollections,
-    defineCollection,
-    type CollectionConfig,
-    type CollectionsConfig,
-    type ReactCollectionsResult,
+    createReactProvider,
+    type ReactProviderResult,
 } from './react.js';
 
 export { SubscriptionManager, SUBSCRIPTION_CONFIG } from './subscription-manager';

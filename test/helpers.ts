@@ -2,10 +2,25 @@ import { QueryClient } from '@tanstack/react-query'
 import PocketBase from 'pocketbase'
 import type { Collection } from '@tanstack/db'
 import 'dotenv/config'
-import { CollectionFactory, newRecordId } from '../src'
+import { createCollection, newRecordId } from '../src'
 import type { Schema } from './schema'
 
 export { newRecordId }
+
+/**
+ * Compatibility shim for old CollectionFactory API.
+ * Returns an object with a create() method that matches the old factory pattern.
+ */
+export function createCollectionFactory(queryClient: QueryClient) {
+    return {
+        create: <C extends keyof Schema & string, Opts = any>(
+            collectionName: C,
+            options?: Opts
+        ) => {
+            return createCollection<Schema>(pb, queryClient)(collectionName, options as any);
+        }
+    };
+}
 
 if (!process.env.TESTING_PB_ADDR) {
     throw new Error('TESTING_PB_ADDR environment variable is not set')
@@ -60,26 +75,17 @@ export function getCurrentOrg(): string | undefined {
 }
 
 /**
- * Create a CollectionFactory instance with PocketBase and QueryClient
- */
-export function createCollectionFactory(queryClient: QueryClient): CollectionFactory<Schema> {
-    return new CollectionFactory<Schema>(pb, queryClient)
-}
-
-/**
  * Create a books collection with the given query client
  */
 export function createBooksCollection(queryClient: QueryClient) {
-    const factory = createCollectionFactory(queryClient)
-    return factory.create('books')
+    return createCollection<Schema>(pb, queryClient)('books', {})
 }
 
 /**
  * Create an authors collection with the given query client
  */
 export function createAuthorsCollection(queryClient: QueryClient) {
-    const factory = createCollectionFactory(queryClient)
-    return factory.create('authors')
+    return createCollection<Schema>(pb, queryClient)('authors', {})
 }
 
 /**

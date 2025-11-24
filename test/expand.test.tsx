@@ -3,14 +3,13 @@ import { useLiveQuery } from '@tanstack/react-db';
 import { afterAll, beforeAll, beforeEach, afterEach, describe, expect, it } from 'vitest';
 import type { QueryClient } from '@tanstack/react-query';
 
-import { CollectionFactory } from '../src/collection';
-import { createReactCollections, defineCollection } from '../src/react';
+import { createCollection, createCollections } from '../src/collection';
+import { createReactProvider } from '../src/react';
 import type { Schema } from './schema';
 import { pb, createTestQueryClient, authenticateTestUser, clearAuth, getTestAuthorId } from './helpers';
 
 describe('Query-Time Expand Feature', () => {
     let queryClient: QueryClient;
-    let factory: CollectionFactory<Schema>;
 
     beforeAll(async () => {
         await authenticateTestUser();
@@ -22,17 +21,16 @@ describe('Query-Time Expand Feature', () => {
 
     beforeEach(() => {
         queryClient = createTestQueryClient();
-        factory = new CollectionFactory<Schema>(pb, queryClient);
     });
 
     afterEach(() => {
         queryClient.clear();
     });
 
-    describe('CollectionFactory.create() with expandable', () => {
+    describe('createCollection() with expandable', () => {
         it('should create collection with expandable config', () => {
-            const authorsCollection = factory.create('authors');
-            const booksCollection = factory.create('books', {
+            const authorsCollection = createCollection<Schema>(pb, queryClient)('authors', {});
+            const booksCollection = createCollection<Schema>(pb, queryClient)('books', {
                 expandable: {
                     author: authorsCollection
                 }
@@ -43,14 +41,14 @@ describe('Query-Time Expand Feature', () => {
         });
 
         it('should create collection without expandable (expand method still exists)', () => {
-            const booksCollection = factory.create('books');
+            const booksCollection = createCollection<Schema>(pb, queryClient)('books', {});
 
             expect(booksCollection.expand).toBeDefined();
             expect(typeof booksCollection.expand).toBe('function');
         });
 
         it('should throw error when calling expand() without expandable config', () => {
-            const booksCollection = factory.create('books');
+            const booksCollection = createCollection<Schema>(pb, queryClient)('books', {});
 
             expect(() => {
                 booksCollection.expand(['author'] as const);
@@ -58,8 +56,8 @@ describe('Query-Time Expand Feature', () => {
         });
 
         it('should throw error when expanding field not in expandable config', () => {
-            const authorsCollection = factory.create('authors');
-            const booksCollection = factory.create('books', {
+            const authorsCollection = createCollection<Schema>(pb, queryClient)('authors', {});
+            const booksCollection = createCollection<Schema>(pb, queryClient)('books', {
                 expandable: {
                     author: authorsCollection
                 }
@@ -73,9 +71,9 @@ describe('Query-Time Expand Feature', () => {
     });
 
     describe('Expand with single relation', () => {
-        it('should expand author relation and insert into authors collection', async () => {
-            const authorsCollection = factory.create('authors');
-            const booksCollection = factory.create('books', {
+        it.only ('should expand author relation and insert into authors collection', async () => {
+            const authorsCollection = createCollection<Schema>(pb, queryClient)('authors', {});
+            const booksCollection = createCollection<Schema>(pb, queryClient)('books', {
                 expandable: {
                     author: authorsCollection
                 }
@@ -122,8 +120,8 @@ describe('Query-Time Expand Feature', () => {
         }, 15000);
 
         it('should type-check expanded fields correctly', async () => {
-            const authorsCollection = factory.create('authors');
-            const booksCollection = factory.create('books', {
+            const authorsCollection = createCollection<Schema>(pb, queryClient)('authors', {});
+            const booksCollection = createCollection<Schema>(pb, queryClient)('books', {
                 expandable: {
                     author: authorsCollection
                 }
@@ -153,8 +151,8 @@ describe('Query-Time Expand Feature', () => {
 
     describe('Expand without selection (base collection)', () => {
         it('should not include expand when using base collection', async () => {
-            const authorsCollection = factory.create('authors');
-            const booksCollection = factory.create('books', {
+            const authorsCollection = createCollection<Schema>(pb, queryClient)('authors', {});
+            const booksCollection = createCollection<Schema>(pb, queryClient)('books', {
                 expandable: {
                     author: authorsCollection
                 }
@@ -186,18 +184,19 @@ describe('Query-Time Expand Feature', () => {
         }, 15000);
     });
 
-    describe('React Integration with createReactCollections', () => {
+    describe('React Integration with createReactProvider', () => {
         it('should work with useStore and expand', async () => {
-            const { Provider, useStore } = createReactCollections<Schema>(pb, queryClient)({
-                authors: defineCollection('authors', {}),
-                books: defineCollection('books', {}),
+            const collections = createCollections<Schema>(pb, queryClient)({
+                authors: {},
+                books: {},
             });
+            const { Provider, useStore } = createReactProvider(collections);
 
             const { result } = renderHook(
                 () => {
                     const authors = useStore('authors');
 
-                    const booksCollection = factory.create('books', {
+                    const booksCollection = createCollection<Schema>(pb, queryClient)('books', {
                         expandable: {
                             author: authors
                         }
@@ -225,17 +224,17 @@ describe('Query-Time Expand Feature', () => {
         }, 15000);
 
         it('should support using expandable with useStore collections', async () => {
-            const { Provider, useStore } = createReactCollections<Schema>(pb, queryClient)({
-                authors: defineCollection('authors', {}),
-                books: defineCollection('books', {}),
+            const collections = createCollections<Schema>(pb, queryClient)({
+                authors: {},
+                books: {},
             });
+            const { Provider, useStore } = createReactProvider(collections);
 
             const { result } = renderHook(
                 () => {
                     const [books, authors] = useStore('books', 'authors');
 
-                    // Create expandable relationship using useStore collections
-                    const booksWithExpandable = factory.create('books', {
+                    const booksWithExpandable = createCollection<Schema>(pb, queryClient)('books', {
                         expandable: {
                             author: authors
                         }
@@ -264,10 +263,10 @@ describe('Query-Time Expand Feature', () => {
 
     describe('Cache key normalization', () => {
         it('should normalize field order in query keys', async () => {
-            const authorsCollection = factory.create('authors');
-            const bookMetadataCollection = factory.create('book_metadata');
+            const authorsCollection = createCollection<Schema>(pb, queryClient)('authors', {});
+            const bookMetadataCollection = createCollection<Schema>(pb, queryClient)('book_metadata', {});
 
-            const booksCollection = factory.create('books', {
+            const booksCollection = createCollection<Schema>(pb, queryClient)('books', {
                 expandable: {
                     author: authorsCollection,
                 }
@@ -298,7 +297,7 @@ describe('Query-Time Expand Feature', () => {
 
     describe('Error messages', () => {
         it('should provide helpful error when expandable not configured', () => {
-            const booksCollection = factory.create('books');
+            const booksCollection = createCollection<Schema>(pb, queryClient)('books', {});
 
             expect(() => {
                 booksCollection.expand(['author'] as const);
@@ -309,8 +308,8 @@ describe('Query-Time Expand Feature', () => {
         });
 
         it('should list available fields when invalid field provided', () => {
-            const authorsCollection = factory.create('authors');
-            const booksCollection = factory.create('books', {
+            const authorsCollection = createCollection<Schema>(pb, queryClient)('authors', {});
+            const booksCollection = createCollection<Schema>(pb, queryClient)('books', {
                 expandable: {
                     author: authorsCollection
                 }

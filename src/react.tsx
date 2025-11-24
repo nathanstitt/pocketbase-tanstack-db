@@ -1,99 +1,4 @@
 import React, { createContext, useContext, type ReactNode } from 'react';
-import PocketBase from 'pocketbase';
-import { QueryClient } from '@tanstack/react-query';
-import type { Collection } from '@tanstack/db';
-import { CollectionFactory } from './collection';
-import type {
-    SchemaDeclaration,
-    CreateCollectionOptions,
-    SubscribableCollection,
-    JoinHelper,
-    ExpandableCollection,
-    ExtractRecordType,
-} from './types';
-
-/**
- * Configuration for a single collection in createReactCollections.
- * Internal type with collection name tracking.
- */
-export type CollectionConfig<
-    Schema extends SchemaDeclaration,
-    CollectionName extends keyof Schema
-> = CreateCollectionOptions<Schema, CollectionName> & {
-    _collectionName: CollectionName;
-    collection?: CollectionName;
-};
-
-/**
- * Helper function to define a collection with proper type inference.
- * This function captures the collection name at the type level, enabling
- * perfect type inference without manual type declarations.
- *
- * @param collection - The PocketBase collection name (must match schema)
- * @param options - Optional collection configuration (expand, relations, etc.)
- * @returns A typed collection configuration
- *
- * @example
- * ```typescript
- * const authorsCollection = factory.create('authors');
- * const { Provider, useStore } = createReactCollections<Schema>(pb, queryClient, {
- *     books: defineCollection('books', {
- *         expandable: { author: authorsCollection }
- *     }),
- *     authors: defineCollection('authors', {}),
- * });
- * ```
- */
-export function defineCollection<
-    Schema extends SchemaDeclaration,
-    K extends keyof Schema & string
->(
-    collection: K,
-    options?: Omit<CreateCollectionOptions<Schema, K>, 'collection'>
-): CollectionConfig<Schema, K> {
-    return {
-        ...options,
-        collection,
-        _collectionName: collection,
-    } as CollectionConfig<Schema, K>;
-}
-
-/**
- * Map of config keys to their collection configurations.
- */
-export type CollectionsConfig<Schema extends SchemaDeclaration> = Record<
-    string,
-    {
-        _collectionName: keyof Schema & string;
-    } & CollectionConfig<Schema, any>
->;
-
-/**
- * Infers the Collection type from a CollectionConfig.
- * @internal
- */
-type InferCollectionType<
-    Schema extends SchemaDeclaration,
-    Config extends { _collectionName: keyof Schema }
-> = Config extends { _collectionName: infer C } & CollectionConfig<Schema, any>
-    ? C extends keyof Schema
-        ? Collection<ExtractRecordType<Schema, C>> &
-          SubscribableCollection<ExtractRecordType<Schema, C>> &
-          JoinHelper<Schema, C, ExtractRecordType<Schema, C>> &
-          ExpandableCollection<Schema, C, ExtractRecordType<Schema, C>>
-        : never
-    : never;
-
-/**
- * Builds a map of collection keys to their inferred Collection types.
- * @internal
- */
-type InferCollectionsMap<
-    Schema extends SchemaDeclaration,
-    Config extends CollectionsConfig<Schema>
-> = {
-    [K in keyof Config]: InferCollectionType<Schema, Config[K]>;
-};
 
 /**
  * UseStore hook type for single collection access.
@@ -118,9 +23,9 @@ type UseStoreMultiple<CollectionsMap> = <K extends readonly (keyof CollectionsMa
 type UseStoreFn<CollectionsMap> = UseStoreSingle<CollectionsMap> & UseStoreMultiple<CollectionsMap>;
 
 /**
- * Return type for createReactCollections function.
+ * Return type for createReactProvider function.
  */
-export interface ReactCollectionsResult<CollectionsMap> {
+export interface ReactProviderResult<CollectionsMap> {
     /**
      * React Context Provider component.
      * Wrap your app with this provider to make collections available to useStore.
@@ -144,62 +49,44 @@ export interface ReactCollectionsResult<CollectionsMap> {
 }
 
 /**
- * Creates a fully typed React integration for PocketBase collections.
- * This function replaces the old pattern of manual module augmentation with automatic type inference.
+ * Creates a React Provider and useStore hook from an existing collections map.
+ * This function wraps collections created by createCollections() for React integration.
  *
- * @param pb - PocketBase client instance
- * @param queryClient - TanStack Query client
- * @param config - Configuration object mapping keys to collection options
+ * @param collections - Map of collection keys to Collection instances (from createCollections)
  * @returns Object containing Provider component and useStore hook
  *
  * @example
  * Basic usage:
  * ```tsx
- * import { createReactCollections } from 'pbtsdb';
+ * import { createCollections, createReactProvider } from 'pbtsdb';
+ * import { useLiveQuery } from '@tanstack/react-db';
  *
- * type Schema = {
- *     books: {
- *         type: Books;
- *         relations: { author: Authors };
- *     };
- *     authors: {
- *         type: Authors;
- *         relations: {};
- *     };
- * };
- *
- * const { Provider, useStore } = createReactCollections<Schema>(pb, queryClient, {
- *     books: {
- *         expand: 'author' as const
- *     },
+ * // Step 1: Create collections (universal)
+ * const collections = createCollections<Schema>(pb, queryClient)({
+ *     books: {},
  *     authors: {}
  * });
  *
- * // In your app root:
- * <Provider>
- *     <App />
- * </Provider>
+ * // Step 2: Wrap for React
+ * const { Provider, useStore } = createReactProvider(collections);
  *
- * // In components:
+ * // Step 3: Wrap your app
+ * function App() {
+ *     return (
+ *         <QueryClientProvider client={queryClient}>
+ *             <Provider>
+ *                 <BooksList />
+ *             </Provider>
+ *         </QueryClientProvider>
+ *     );
+ * }
+ *
+ * // Step 4: Use in components
  * function BooksList() {
  *     const books = useStore('books');
  *     const { data } = useLiveQuery((q) => q.from({ books }));
  *     return <div>{data?.map(book => <p key={book.id}>{book.title}</p>)}</div>;
  * }
- * ```
- *
- * @example
- * With collection name override:
- * ```tsx
- * const { Provider, useStore } = createReactCollections<Schema>(pb, queryClient, {
- *     myBooks: {
- *         collection: 'books',  // Key is 'myBooks', but uses 'books' collection
- *         expand: 'author' as const
- *     }
- * });
- *
- * // Access via the key name:
- * const myBooks = useStore('myBooks');
  * ```
  *
  * @example
@@ -220,65 +107,79 @@ export interface ReactCollectionsResult<CollectionsMap> {
  *     return <div>...</div>;
  * }
  * ```
+ *
+ * @example
+ * With expandable collections:
+ * ```tsx
+ * const collections = createCollections<Schema>(pb, queryClient)({
+ *     authors: {},
+ *     books: {
+ *         expandable: {
+ *             author: authorsCollection  // Pre-create authors first
+ *         }
+ *     }
+ * });
+ *
+ * const { Provider, useStore } = createReactProvider(collections);
+ *
+ * function BooksWithExpandedAuthors() {
+ *     const books = useStore('books');
+ *     const booksWithAuthor = books.expand(['author'] as const);
+ *
+ *     const { data } = useLiveQuery((q) => q.from({ books: booksWithAuthor }));
+ *
+ *     return (
+ *         <ul>
+ *             {data?.map(book => (
+ *                 <li key={book.id}>
+ *                     {book.title} by {book.expand?.author?.name}
+ *                 </li>
+ *             ))}
+ *         </ul>
+ *     );
+ * }
+ * ```
  */
-export function createReactCollections<Schema extends SchemaDeclaration>(
-    pb: PocketBase,
-    queryClient: QueryClient
-) {
-    return <Config extends CollectionsConfig<Schema>>(
-        config: Config
-    ): ReactCollectionsResult<InferCollectionsMap<Schema, Config>> => {
-        type CollectionsMap = InferCollectionsMap<Schema, Config>;
+export function createReactProvider<CollectionsMap extends Record<string, any>>(
+    collections: CollectionsMap
+): ReactProviderResult<CollectionsMap> {
+    const Context = createContext<CollectionsMap | null>(null);
 
-        const factory = new CollectionFactory<Schema>(pb, queryClient);
+    const Provider: React.FC<{ children: ReactNode }> = ({ children }) => (
+        <Context.Provider value={collections}>{children}</Context.Provider>
+    );
 
-        const collections = Object.fromEntries(
-            Object.entries(config).map(([key, opts]) => {
-                const collectionName = opts._collectionName;
-                const { _collectionName: _, collection: __, ...createOpts } = opts;
-                const collection = factory.create(collectionName, createOpts);
-                return [key, collection];
-            })
-        ) as CollectionsMap;
+    function useStore<K extends keyof CollectionsMap>(key: K): CollectionsMap[K];
+    function useStore<K extends readonly (keyof CollectionsMap)[]>(
+        ...keys: K
+    ): { [I in keyof K]: K[I] extends keyof CollectionsMap ? CollectionsMap[K[I]] : never };
+    function useStore<K extends keyof CollectionsMap>(
+        ...keys: K[]
+    ): CollectionsMap[K] | CollectionsMap[K][] {
+        const context = useContext(Context);
 
-        const Context = createContext<CollectionsMap | null>(null);
-
-        const Provider: React.FC<{ children: ReactNode }> = ({ children }) => (
-            <Context.Provider value={collections}>{children}</Context.Provider>
-        );
-
-        function useStore<K extends keyof CollectionsMap>(key: K): CollectionsMap[K];
-        function useStore<K extends readonly (keyof CollectionsMap)[]>(
-            ...keys: K
-        ): { [I in keyof K]: K[I] extends keyof CollectionsMap ? CollectionsMap[K[I]] : never };
-        function useStore<K extends keyof CollectionsMap>(
-            ...keys: K[]
-        ): CollectionsMap[K] | CollectionsMap[K][] {
-            const context = useContext(Context);
-
-            if (!context) {
-                throw new Error('useStore must be used within the Provider returned by createReactCollections');
-            }
-
-            if (keys.length === 1) {
-                const key = keys[0];
-                if (!(key in context)) {
-                    throw new Error(`Collection "${String(key)}" not found in collections config`);
-                }
-                return context[key];
-            }
-
-            return keys.map((key) => {
-                if (!(key in context)) {
-                    throw new Error(`Collection "${String(key)}" not found in collections config`);
-                }
-                return context[key];
-            }) as CollectionsMap[K][];
+        if (!context) {
+            throw new Error('useStore must be used within the Provider returned by createReactProvider');
         }
 
-        return {
-            Provider,
-            useStore: useStore as UseStoreFn<CollectionsMap>,
-        };
+        if (keys.length === 1) {
+            const key = keys[0];
+            if (!(key in context)) {
+                throw new Error(`Collection "${String(key)}" not found in collections`);
+            }
+            return context[key];
+        }
+
+        return keys.map((key) => {
+            if (!(key in context)) {
+                throw new Error(`Collection "${String(key)}" not found in collections`);
+            }
+            return context[key];
+        }) as CollectionsMap[K][];
+    }
+
+    return {
+        Provider,
+        useStore: useStore as UseStoreFn<CollectionsMap>,
     };
 }

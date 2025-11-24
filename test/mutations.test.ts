@@ -1,6 +1,7 @@
 import { renderHook, waitFor } from '@testing-library/react'
 import { useLiveQuery } from '@tanstack/react-db'
 import { eq } from '@tanstack/db'
+import type { UpdateMutationFnParams, InsertMutationFnParams, DeleteMutationFnParams } from '@tanstack/db'
 import { afterAll, beforeAll, beforeEach, afterEach, describe, expect, it } from 'vitest'
 import type { QueryClient } from '@tanstack/react-query'
 
@@ -261,10 +262,10 @@ describe('Collection - Mutations', () => {
 
         const factory = createCollectionFactory(queryClient)
         const collection = factory.create('books', {
-            onUpdate: async ({ transaction }) => {
+            onUpdate: async ({ transaction }: UpdateMutationFnParams<any>) => {
                 txRef = transaction
                 await Promise.all(
-                    transaction.mutations.map(async (mutation) => {
+                    transaction.mutations.map(async (mutation: any) => {
                         const recordWithId = mutation.original as { id: string }
                         await pb.collection('books').update(recordWithId.id, mutation.changes)
                     })
@@ -329,11 +330,11 @@ describe('Collection - Mutations', () => {
 
         const factory = createCollectionFactory(queryClient)
         const collection = factory.create('books', {
-            onUpdate: async ({ transaction }) => {
+            onUpdate: async ({ transaction }: UpdateMutationFnParams<any>) => {
                 mutationCount = transaction.mutations.length
 
                 await Promise.all(
-                    transaction.mutations.map(async (mutation) => {
+                    transaction.mutations.map(async (mutation: any) => {
                         const recordWithId = mutation.original as { id: string }
                         await pb.collection('books').update(recordWithId.id, mutation.changes)
                     })
@@ -451,10 +452,10 @@ describe('Collection - Mutations', () => {
 
         const factory = createCollectionFactory(queryClient)
         const collection = factory.create('books', {
-            onUpdate: async ({ transaction }) => {
+            onUpdate: async ({ transaction }: UpdateMutationFnParams<any>) => {
                 await new Promise<void>((resolve) => setTimeout(resolve, 100))
                 await Promise.all(
-                    transaction.mutations.map(async (mutation) => {
+                    transaction.mutations.map(async (mutation: any) => {
                         const recordWithId = mutation.original as { id: string }
                         await pb.collection('books').update(recordWithId.id, mutation.changes)
                     })
@@ -549,7 +550,7 @@ describe('Collection - Mutations', () => {
 
         const factory = createCollectionFactory(queryClient)
         const collection = factory.create('books', {
-            onUpdate: async ({ transaction }) => {
+            onUpdate: async ({ transaction }: UpdateMutationFnParams<any>) => {
                 const mutation = transaction.mutations[0]
                 expect(mutation.type).toBe('update')
                 expect(mutation.original).toBeDefined()

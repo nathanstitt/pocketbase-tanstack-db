@@ -97,11 +97,9 @@ describe('Collection - Relations', () => {
             }
         })
 
-        const booksWithAuthor = booksCollection.expand(['author'] as const)
-
         const { result } = renderHook(() =>
             useLiveQuery((q) =>
-                q.from({ books: booksWithAuthor })
+                q.from({ books: booksCollection.expand(['author'] as const) })
             )
         )
 

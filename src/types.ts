@@ -112,7 +112,10 @@ export interface JoinHelper<
      *
      * @example
      * ```ts
-     * const jobsCollection = factory.create('jobs', {
+     * const customersCollection = createCollection<Schema>(pb, queryClient)('customers');
+     * const addressesCollection = createCollection<Schema>(pb, queryClient)('addresses');
+     *
+     * const jobsCollection = createCollection<Schema>(pb, queryClient)('jobs', {
      *     relations: {
      *         customer: customersCollection,
      *         address: addressesCollection
@@ -149,7 +152,11 @@ export interface ExpandableCollection<
      *
      * @example
      * ```ts
-     * const jobsCollection = factory.create('jobs', {
+     * const customersCollection = createCollection<Schema>(pb, queryClient)('customers');
+     * const addressesCollection = createCollection<Schema>(pb, queryClient)('addresses');
+     * const tagsCollection = createCollection<Schema>(pb, queryClient)('tags');
+     *
+     * const jobsCollection = createCollection<Schema>(pb, queryClient)('jobs', {
      *     expandable: {
      *         customer: customersCollection,
      *         address: addressesCollection,
@@ -340,10 +347,15 @@ export type RelationAsCollection<T> =
  *
  * @example
  * ```ts
- * const config: RelationsConfig<Schema, 'jobs'> = {
- *     customer: customersCollection,
- *     address: addressesCollection
- * };
+ * const customersCollection = createCollection<Schema>(pb, queryClient)('customers');
+ * const addressesCollection = createCollection<Schema>(pb, queryClient)('addresses');
+ *
+ * const jobsCollection = createCollection<Schema>(pb, queryClient)('jobs', {
+ *     relations: {
+ *         customer: customersCollection,
+ *         address: addressesCollection
+ *     }
+ * });
  * ```
  */
 export type RelationsConfig<
@@ -363,11 +375,17 @@ export type RelationsConfig<
  *
  * @example
  * ```ts
- * const config: ExpandableConfig<Schema, 'jobs'> = {
- *     customer: customersCollection,
- *     address: addressesCollection,
- *     tags: tagsCollection
- * };
+ * const customersCollection = createCollection<Schema>(pb, queryClient)('customers');
+ * const addressesCollection = createCollection<Schema>(pb, queryClient)('addresses');
+ * const tagsCollection = createCollection<Schema>(pb, queryClient)('tags');
+ *
+ * const jobsCollection = createCollection<Schema>(pb, queryClient)('jobs', {
+ *     expandable: {
+ *         customer: customersCollection,
+ *         address: addressesCollection,
+ *         tags: tagsCollection
+ *     }
+ * });
  * ```
  */
 export type ExpandableConfig<
@@ -397,7 +415,10 @@ export interface CreateCollectionOptions<
      *
      * @example
      * ```ts
-     * const jobsCollection = factory.create('jobs', {
+     * const customersCollection = createCollection<Schema>(pb, queryClient)('customers');
+     * const addressesCollection = createCollection<Schema>(pb, queryClient)('addresses');
+     *
+     * const jobsCollection = createCollection<Schema>(pb, queryClient)('jobs', {
      *     relations: {
      *         customer: customersCollection,
      *         address: addressesCollection
@@ -417,10 +438,10 @@ export interface CreateCollectionOptions<
      *
      * @example
      * ```ts
-     * const customersCollection = factory.create('customers');
-     * const addressesCollection = factory.create('addresses');
+     * const customersCollection = createCollection<Schema>(pb, queryClient)('customers');
+     * const addressesCollection = createCollection<Schema>(pb, queryClient)('addresses');
      *
-     * const jobsCollection = factory.create('jobs', {
+     * const jobsCollection = createCollection<Schema>(pb, queryClient)('jobs', {
      *     expandable: {
      *         customer: customersCollection,
      *         address: addressesCollection
@@ -442,12 +463,12 @@ export interface CreateCollectionOptions<
      * @example
      * ```ts
      * // Lazy loading (default) - sync starts after query
-     * const jobsCollection = factory.create('jobs');
+     * const jobsCollection = createCollection<Schema>(pb, queryClient)('jobs');
      * // or explicitly:
-     * const jobsCollection = factory.create('jobs', { startSync: false });
+     * const jobsCollection = createCollection<Schema>(pb, queryClient)('jobs', { startSync: false });
      *
      * // Eager loading - sync starts immediately on creation
-     * const jobsCollection = factory.create('jobs', {
+     * const jobsCollection = createCollection<Schema>(pb, queryClient)('jobs', {
      *     startSync: true
      * });
      * ```
@@ -467,7 +488,7 @@ export interface CreateCollectionOptions<
      * @example
      * ```ts
      * // Allow inserting without created, updated (server-generated timestamps)
-     * const booksCollection = factory.create('books', {
+     * const booksCollection = createCollection<Schema>(pb, queryClient)('books', {
      *     omitOnInsert: ['created', 'updated'] as const
      * });
      *
@@ -497,10 +518,10 @@ export interface CreateCollectionOptions<
      * @example
      * ```ts
      * // Use default automatic handler (recommended)
-     * const collection = factory.create('books');
+     * const collection = createCollection<Schema>(pb, queryClient)('books');
      *
      * // Custom handler
-     * const collection = factory.create('books', {
+     * const collection = createCollection<Schema>(pb, queryClient)('books', {
      *     onInsert: async ({ transaction }) => {
      *         for (const mutation of transaction.mutations) {
      *             await customInsertLogic(mutation.modified);
@@ -510,7 +531,7 @@ export interface CreateCollectionOptions<
      * });
      *
      * // Disable inserts (read-only collection)
-     * const collection = factory.create('books', {
+     * const collection = createCollection<Schema>(pb, queryClient)('books', {
      *     onInsert: false
      * });
      * ```
@@ -530,10 +551,10 @@ export interface CreateCollectionOptions<
      * @example
      * ```ts
      * // Use default automatic handler (recommended)
-     * const collection = factory.create('books');
+     * const collection = createCollection<Schema>(pb, queryClient)('books');
      *
      * // Custom handler
-     * const collection = factory.create('books', {
+     * const collection = createCollection<Schema>(pb, queryClient)('books', {
      *     onUpdate: async ({ transaction }) => {
      *         for (const mutation of transaction.mutations) {
      *             await customUpdateLogic(mutation.original.id, mutation.changes);
@@ -543,7 +564,7 @@ export interface CreateCollectionOptions<
      * });
      *
      * // Disable updates (read-only collection)
-     * const collection = factory.create('books', {
+     * const collection = createCollection<Schema>(pb, queryClient)('books', {
      *     onUpdate: false
      * });
      * ```
@@ -562,10 +583,10 @@ export interface CreateCollectionOptions<
      * @example
      * ```ts
      * // Use default automatic handler (recommended)
-     * const collection = factory.create('books');
+     * const collection = createCollection<Schema>(pb, queryClient)('books');
      *
      * // Custom handler
-     * const collection = factory.create('books', {
+     * const collection = createCollection<Schema>(pb, queryClient)('books', {
      *     onDelete: async ({ transaction }) => {
      *         for (const mutation of transaction.mutations) {
      *             await customDeleteLogic(mutation.original.id);
@@ -575,7 +596,7 @@ export interface CreateCollectionOptions<
      * });
      *
      * // Disable deletes (read-only collection)
-     * const collection = factory.create('books', {
+     * const collection = createCollection<Schema>(pb, queryClient)('books', {
      *     onDelete: false
      * });
      * ```

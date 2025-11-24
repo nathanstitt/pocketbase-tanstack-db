@@ -20,13 +20,6 @@ export type {
     RelationsConfig,
 } from './types';
 
-export {
-    CollectionsProvider,
-    useStore,
-    type CollectionsMap,
-    type CollectionsProviderProps,
-} from './provider';
-
 /**
  * Factory for creating type-safe TanStack DB collections backed by PocketBase.
  * Integrates real-time subscriptions with automatic synchronization.

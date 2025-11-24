@@ -4,7 +4,7 @@
 
 This library connects PocketBase (backend-as-a-service) to TanStack's reactive database tools. Use it when building React applications that need real-time data synchronization with PocketBase while maintaining strict type safety.
 
-## Core Pattern
+## Core Pattern (React)
 
 ```typescript
 // 1. Define schema with type and relations properties
@@ -15,51 +15,34 @@ export type Schema = {
             author?: Author;
         };
     };
+    authors: {
+        type: Author;
+        relations: {};
+    };
 }
 
-// 2. Create factory (once per app)
-const factory = new CollectionFactory<Schema>(pb, queryClient);
-
-// 3. Create collections with optional expand for type-safe relations
-const booksCollection = factory.create('books', {
-    expand: 'author' as const  // Use 'as const' for type inference
+// 2. Create React integration with automatic type inference
+const { Provider, useStore } = createReactCollections<Schema>(pb, queryClient)({
+    books: defineCollection('books', {
+        expand: 'author' as const  // Use 'as const' for type inference
+    }),
+    authors: defineCollection('authors', {}),
 });
 
-// 4. Use in React components with automatic subscriptions
-const { data } = useLiveQuery((q) => q.from({ books: booksCollection }));
-// Subscriptions start/stop automatically with component lifecycle
-```
+// 3. Wrap your app with Provider
+<Provider>
+    <App />
+</Provider>
 
-## React Integration
-
-### CollectionsProvider (Optional)
-
-Share collections across components using React Context:
-
-```typescript
-// App setup
-const factory = new CollectionFactory<Schema>(pb, queryClient);
-const collections = {
-    books: factory.create('books'),
-    authors: factory.create('authors'),
-};
-
-function App() {
-    return (
-        <CollectionsProvider collections={collections}>
-            <YourApp />
-        </CollectionsProvider>
-    );
-}
-
-// In components
+// 4. Use in components - fully typed automatically!
 function BooksList() {
-    const books = useStore('books'); // Single collection
+    const books = useStore('books');  // ✅ Typed automatically
     const { data } = useLiveQuery((q) => q.from({ books }));
+    // Subscriptions start/stop automatically with component lifecycle
 }
 
 function BooksWithAuthors() {
-    const [books, authors] = useStore('books', 'authors'); // Multiple collections
+    const [books, authors] = useStore('books', 'authors');  // ✅ Variadic access
     const { data } = useLiveQuery((q) =>
         q.from({ book: books })
             .join({ author: authors }, ({ book, author }) => eq(book.author, author.id))
@@ -68,33 +51,41 @@ function BooksWithAuthors() {
 ```
 
 **useStore() API:**
-- Single key: `useStore('books')` → returns `Collection<Books>`
-- Multiple keys: `useStore('books', 'authors')` → returns `[Collection<Books>, Collection<Authors>]`
-- Fully type-safe with automatic inference when using CollectionsRegistry augmentation
+- Single key: `useStore('books')` → returns typed collection
+- Multiple keys: `useStore('books', 'authors')` → returns typed tuple
+- NO manual type declarations needed - types inferred from `defineCollection`!
 
-**Type Safety Setup:**
+**Custom Collection Keys:**
 ```typescript
-// Augment CollectionsRegistry for automatic type inference
-declare module 'pbtsdb' {
-    interface CollectionsRegistry {
-        books: Collection<Books>;
-        authors: Collection<Authors>;
-    }
-}
-
-// Now useStore has full type inference
-const books = useStore('books'); // Type: Collection<Books>
-const [books, authors] = useStore('books', 'authors'); // Tuple types preserved
+const { Provider, useStore } = createReactCollections<Schema>(pb, queryClient)({
+    myBooks: defineCollection('books', {  // Key 'myBooks', collection 'books'
+        expand: 'author' as const
+    })
+});
 ```
 
 ## Key Concepts
 
-- **CollectionFactory**: Create ONE factory per app, use it to create multiple collections
+- **createReactCollections**: One call creates Provider and typed useStore hook - no manual type declarations!
 - **Collections are lazy**: No network activity until first query
 - **Subscriptions are automatic**: Start when component mounts, stop 5s after unmount
 - **Type-safe expand**: Use `as const` on expand strings for full TypeScript inference
 - **Schema structure**: Use `type` and `relations` properties (lowercase, not `Row`/`Relations`)
 - **Package name**: Import from `pbtsdb` (not `pocketbase-tanstack-db`)
+
+## Non-React Usage
+
+For non-React environments, use `CollectionFactory` directly:
+
+```typescript
+import { CollectionFactory } from 'pbtsdb';
+
+const factory = new CollectionFactory<Schema>(pb, queryClient);
+const booksCollection = factory.create('books');
+
+// Manual data access (non-reactive)
+const books = await booksCollection.getFullList();
+```
 
 ## Testing
 
@@ -115,44 +106,51 @@ Tests use real PocketBase instance (not mocked). Server infrastructure is fully 
 Collections support insert, update, and delete with automatic PocketBase sync:
 
 ```typescript
-import { newRecordId } from 'pbtsdb';
+import { newRecordId, createReactCollections, defineCollection } from 'pbtsdb';
 
-// Insert with optimistic update (UI updates immediately)
-const tx = collection.insert({
-    id: newRecordId(), // Generate PocketBase-compatible ID
-    title: 'New Book',
-    // ... other fields
+// Setup with custom mutation handlers (optional)
+const { Provider, useStore } = createReactCollections<Schema>(pb, queryClient)({
+    books: defineCollection('books', {
+        onInsert: async ({ transaction }) => { /* custom logic */ },
+        onUpdate: false, // Disable updates (throws error if called)
+        onDelete: false, // Disable deletes
+    })
 });
 
-// Update with optimistic update
-collection.update('record_id', (draft) => {
-    draft.title = 'Updated Title';
-});
+// In component
+function BooksList() {
+    const books = useStore('books');
 
-// Update with config (non-optimistic - waits for server)
-collection.update('record_id', { optimistic: false }, (draft) => {
-    draft.title = 'Server-First Update';
-});
+    // Insert with optimistic update (UI updates immediately)
+    const tx = books.insert({
+        id: newRecordId(), // Generate PocketBase-compatible ID
+        title: 'New Book',
+        // ... other fields
+    });
 
-// Delete with optimistic update
-collection.delete('record_id');
+    // Update with optimistic update
+    books.update('record_id', (draft) => {
+        draft.title = 'Updated Title';
+    });
 
-// Batch mutations - merges multiple updates to same record
-collection.utils.writeBatch(() => {
-    collection.update('id1', (draft) => { draft.field1 = 'value1' });
-    collection.update('id1', (draft) => { draft.field2 = 'value2' }); // Merged!
-    collection.update('id2', (draft) => { draft.field = 'value' });
-});
+    // Update with config (non-optimistic - waits for server)
+    books.update('record_id', { optimistic: false }, (draft) => {
+        draft.title = 'Server-First Update';
+    });
 
-// Wait for persistence
-await tx.isPersisted.promise; // States: pending → persisting → completed
+    // Delete with optimistic update
+    books.delete('record_id');
 
-// Custom handlers or disable mutations
-const collection = factory.create('books', {
-    onInsert: async ({ transaction }) => { /* custom logic */ },
-    onUpdate: false, // Disable updates (throws error if called)
-    onDelete: false, // Disable deletes
-});
+    // Batch mutations - merges multiple updates to same record
+    books.utils.writeBatch(() => {
+        books.update('id1', (draft) => { draft.field1 = 'value1' });
+        books.update('id1', (draft) => { draft.field2 = 'value2' }); // Merged!
+        books.update('id2', (draft) => { draft.field = 'value' });
+    });
+
+    // Wait for persistence
+    await tx.isPersisted.promise; // States: pending → persisting → completed
+}
 ```
 
 **Key Points:**
@@ -166,13 +164,21 @@ const collection = factory.create('books', {
 
 **Approach 1: Type-Safe Expand (Recommended)**
 ```typescript
-const jobs = factory.create('jobs', { expand: 'customer,address' as const });
+const { Provider, useStore } = createReactCollections<Schema>(pb, queryClient)({
+    jobs: defineCollection('jobs', { expand: 'customer,address' as const })
+});
 // Single PocketBase query, server-side join, fully typed expand property
 ```
 
 **Approach 2: TanStack Joins (Advanced)**
 ```typescript
-const jobs = factory.create('jobs', { relations: { customer: customersCollection }});
+const { Provider, useStore } = createReactCollections<Schema>(pb, queryClient)({
+    jobs: defineCollection('jobs', {}),
+    customers: defineCollection('customers', {}),
+});
+
+// In component
+const [jobs, customers] = useStore('jobs', 'customers');
 // Client-side joins with full type safety, supports inner/left/right/full joins
 ```
 

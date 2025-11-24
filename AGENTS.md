@@ -530,13 +530,156 @@ const filtered = await pb.collection('jobs')
 - The `getFullList()` method populates the QueryClient cache
 - Individual records can be accessed reactively via query keys
 
-**React Usage (if adding React components):**
-```typescript
-import { useLiveQuery } from '@tanstack/react-db';
+## React Integration
 
-// In component
-const jobs = useLiveQuery(collection, selector => selector.getAll());
+### createReactCollections()
+
+**NEW in v1.0.0:** The recommended way to integrate pbtsdb with React applications. This function eliminates the need for manual module augmentation and provides automatic type inference.
+
+#### Basic Usage
+
+```typescript
+import { createReactCollections, defineCollection } from 'pocketbase-tanstack-db';
+import PocketBase from 'pocketbase';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+
+// Initialize PocketBase and QueryClient
+const pb = new PocketBase('http://localhost:8090');
+const queryClient = new QueryClient();
+
+// Define your schema (same as before)
+type MySchema = {
+    books: {
+        type: Books;
+        relations: {
+            author: Authors;
+        };
+    };
+    authors: {
+        type: Authors;
+        relations: {};
+    };
+}
+
+// Create typed React integration - automatic type inference!
+const { Provider, useStore } = createReactCollections<MySchema>(pb, queryClient)({
+    books: defineCollection('books', {
+        expand: 'author' as const  // Type-safe expand
+    }),
+    authors: defineCollection('authors', {}),
+});
+
+// Wrap your app
+function App() {
+    return (
+        <QueryClientProvider client={queryClient}>
+            <Provider>
+                <BooksList />
+            </Provider>
+        </QueryClientProvider>
+    );
+}
+
+// Use in components
+function BooksList() {
+    const books = useStore('books');  // ✅ Fully typed automatically!
+
+    const { data, isLoading } = useLiveQuery((q) =>
+        q.from({ books })
+    );
+
+    if (isLoading) return <div>Loading...</div>;
+
+    return (
+        <ul>
+            {data?.map(book => (
+                <li key={book.id}>
+                    {book.title}
+                    {/* Expanded relations are fully typed! */}
+                    {book.expand?.author && ` by ${book.expand.author.name}`}
+                </li>
+            ))}
+        </ul>
+    );
+}
 ```
+
+#### Key Benefits
+
+1. **Automatic Type Inference** - No manual `declare module` augmentation needed
+2. **Single Source of Truth** - Types flow from config → Provider → useStore
+3. **Impossible Type Mismatches** - TypeScript enforces that keys match config
+4. **Scoped Contexts** - Each `createReactCollections` creates isolated Provider/useStore pair
+
+#### Collection Name Override
+
+By default, keys in the config object map to PocketBase collection names. You can override this:
+
+```typescript
+const { Provider, useStore } = createReactCollections<MySchema>(pb, queryClient)({
+    myBooks: defineCollection('books', {  // Key 'myBooks', collection 'books'
+        expand: 'author' as const
+    })
+});
+
+// Access via custom key
+const myBooks = useStore('myBooks');
+```
+
+#### Variadic useStore
+
+Access multiple collections at once:
+
+```typescript
+function BooksWithAuthors() {
+    const [books, authors] = useStore('books', 'authors');  // ✅ Fully typed array!
+
+    const { data } = useLiveQuery((q) =>
+        q.from({ book: books })
+            .join(
+                { author: authors },
+                ({ book, author }) => eq(book.author, author.id),
+                'left'
+            )
+    );
+
+    return <div>...</div>;
+}
+```
+
+#### Type Safety Guarantees
+
+```typescript
+const { Provider, useStore } = createReactCollections<MySchema>(pb, queryClient)({
+    books: defineCollection('books', {}),
+    authors: defineCollection('authors', {}),
+});
+
+// ✅ TypeScript knows these exist
+const books = useStore('books');
+const authors = useStore('authors');
+const [b, a] = useStore('books', 'authors');
+
+// ❌ TypeScript compile error: key doesn't exist
+const invalid = useStore('nonexistent');
+```
+
+
+### Non-React Usage (Advanced)
+
+If you need collections outside of React (Node.js, Vue, etc.), use `CollectionFactory` directly:
+
+```typescript
+import { CollectionFactory } from 'pocketbase-tanstack-db';
+
+const factory = new CollectionFactory<MySchema>(pb, queryClient);
+const booksCollection = factory.create('books');
+
+// Manual data access (non-reactive)
+const books = await booksCollection.getFullList();
+```
+
+**Note:** `CollectionFactory` is kept in the API for non-React use cases and advanced scenarios. For React applications, always use `createReactCollections`.
 
 ## Error Handling
 

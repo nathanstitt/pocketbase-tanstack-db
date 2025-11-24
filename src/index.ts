@@ -11,12 +11,12 @@
 export { CollectionFactory } from './collection';
 
 export {
-    CollectionsProvider,
-    useStore,
-    type CollectionsMap,
-    type CollectionsProviderProps,
-    type CollectionsRegistry,
-} from './provider';
+    createReactCollections,
+    defineCollection,
+    type CollectionConfig,
+    type CollectionsConfig,
+    type ReactCollectionsResult,
+} from './react.js';
 
 export { SubscriptionManager, SUBSCRIPTION_CONFIG } from './subscription-manager';
 

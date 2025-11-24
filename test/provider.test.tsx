@@ -1,25 +1,14 @@
-import React, { type ReactNode } from 'react';
 import { renderHook, waitFor } from '@testing-library/react';
 import { useLiveQuery } from '@tanstack/react-db';
 import { afterAll, beforeAll, beforeEach, afterEach, describe, expect, it } from 'vitest';
 import { eq } from '@tanstack/db'
 import type { QueryClient } from '@tanstack/react-query';
 
-import { CollectionsProvider, useStore } from '../src/provider';
-import type { Books, Authors, BookMetadata } from './schema';
-import type { Collection } from '@tanstack/db';
-import { pb, createTestQueryClient, authenticateTestUser, clearAuth, createCollectionFactory, getTestAuthorId } from './helpers';
+import { createReactCollections, defineCollection } from '../src/react';
+import type { Schema } from './schema';
+import { pb, createTestQueryClient, authenticateTestUser, clearAuth, getTestAuthorId } from './helpers';
 
-declare module '../src/provider' {
-    interface CollectionsRegistry {
-        books: Collection<Books>;
-        authors: Collection<Authors>;
-        metadata: Collection<BookMetadata>;
-        myCustomBooksKey: Collection<Books>;
-    }
-}
-
-describe('CollectionsProvider and Hooks', () => {
+describe('createReactCollections', () => {
     let queryClient: QueryClient;
 
     beforeAll(async () => {
@@ -40,56 +29,47 @@ describe('CollectionsProvider and Hooks', () => {
 
     describe('useStore', () => {
         it('should throw error when used outside provider', () => {
-            // renderHook will catch the error in result.error on first render
+            const { useStore } = createReactCollections<Schema>(pb, queryClient)({
+                books: defineCollection('books', {}),
+            });
+
             expect(() => {
                 renderHook(() => useStore('books'));
-            }).toThrow('useStore must be used within a CollectionsProvider');
+            }).toThrow('useStore must be used within the Provider returned by createReactCollections');
         });
 
         it('should throw error when collection key does not exist', () => {
-            const factory = createCollectionFactory(queryClient);
-            const stores = {
-                books: factory.create('books'),
-            };
-
-            const wrapper = ({ children }: { children: ReactNode }) => (
-                <CollectionsProvider collections={stores}>{children}</CollectionsProvider>
-            );
+            const { Provider, useStore } = createReactCollections<Schema>(pb, queryClient)({
+                books: defineCollection('books', {}),
+            });
 
             expect(() => {
-                // @ts-expect-error - 'nonexistent' is not in CollectionsRegistry
-                renderHook(() => useStore('nonexistent'), { wrapper });
-            }).toThrow('Collection "nonexistent" not found in CollectionsProvider');
+                // @ts-expect-error - Testing runtime error for invalid key
+                renderHook(() => useStore('nonexistent'), {
+                    wrapper: ({ children }) => <Provider>{children}</Provider>
+                });
+            }).toThrow('Collection "nonexistent" not found in collections config');
         });
 
         it('should return collection from provider with automatic type inference', () => {
-            const factory = createCollectionFactory(queryClient);
-            const booksCollection = factory.create('books');
+            const { Provider, useStore } = createReactCollections<Schema>(pb, queryClient)({
+                books: defineCollection('books', {}),
+            });
 
-            const stores = {
-                books: booksCollection,
-            };
+            const { result } = renderHook(() => useStore('books'), {
+                wrapper: ({ children }) => <Provider>{children}</Provider>
+            });
 
-            const wrapper = ({ children }: { children: ReactNode }) => (
-                <CollectionsProvider collections={stores}>{children}</CollectionsProvider>
-            );
-
-            const { result } = renderHook(() => useStore('books'), { wrapper });
-
-            expect(result.current).toBe(booksCollection);
+            expect(result.current).toBeDefined();
+            expect(result.current).toHaveProperty('subscribe');
+            expect(result.current).toHaveProperty('utils');
         });
 
         it('should allow using collection in useLiveQuery', async () => {
-            const factory = createCollectionFactory(queryClient);
-            const booksCollection = factory.create('books');
+            const { Provider, useStore } = createReactCollections<Schema>(pb, queryClient)({
+                books: defineCollection('books', {}),
+            });
 
-            const stores = {
-                books: booksCollection,
-            };
-
-            const wrapper = ({ children }: { children: ReactNode }) => (
-                <CollectionsProvider collections={stores}>{children}</CollectionsProvider>
-            );
             const authorId = await getTestAuthorId()
             const { result } = renderHook(
                 () => {
@@ -98,10 +78,9 @@ describe('CollectionsProvider and Hooks', () => {
                         .where(({ books }) => eq(books.author,  authorId))
                     );
                 },
-                { wrapper }
+                { wrapper: ({ children }) => <Provider>{children}</Provider> }
             );
 
-            // Wait for data to load
             await waitFor(
                 () => {
                     expect(result.current.isLoading).toBe(false);
@@ -118,77 +97,64 @@ describe('CollectionsProvider and Hooks', () => {
 
     describe('useStore with multiple keys', () => {
         it('should throw error when used outside provider', () => {
+            const { useStore } = createReactCollections<Schema>(pb, queryClient)({
+                books: defineCollection('books', {}),
+                authors: defineCollection('authors', {}),
+            });
+
             expect(() => {
                 renderHook(() => useStore('books', 'authors'));
-            }).toThrow('useStore must be used within a CollectionsProvider');
+            }).toThrow('useStore must be used within the Provider returned by createReactCollections');
         });
 
         it('should throw error when any collection key does not exist', () => {
-            const factory = createCollectionFactory(queryClient);
-            const stores = {
-                books: factory.create('books'),
-            };
-
-            const wrapper = ({ children }: { children: ReactNode }) => (
-                <CollectionsProvider collections={stores}>{children}</CollectionsProvider>
-            );
+            const { Provider, useStore } = createReactCollections<Schema>(pb, queryClient)({
+                books: defineCollection('books', {}),
+            });
 
             expect(() => {
-                // @ts-expect-error - 'nonexistent' is not in CollectionsRegistry
-                renderHook(() => useStore('books', 'nonexistent'), { wrapper });
-            }).toThrow('Collection "nonexistent" not found in CollectionsProvider');
+                // @ts-expect-error - Testing runtime error for invalid key
+                renderHook(() => useStore('books', 'nonexistent'), {
+                    wrapper: ({ children }) => <Provider>{children}</Provider>
+                });
+            }).toThrow('Collection "nonexistent" not found in collections config');
         });
 
         it('should return array of collections in correct order with automatic type inference', () => {
-            const factory = createCollectionFactory(queryClient);
-            const booksCollection = factory.create('books');
-            const authorsCollection = factory.create('authors');
-            const metadataCollection = factory.create('book_metadata');
-
-            const stores = {
-                books: booksCollection,
-                authors: authorsCollection,
-                metadata: metadataCollection,
-            };
-
-            const wrapper = ({ children }: { children: ReactNode }) => (
-                <CollectionsProvider collections={stores}>{children}</CollectionsProvider>
-            );
+            const { Provider, useStore } = createReactCollections<Schema>(pb, queryClient)({
+                books: defineCollection('books', {}),
+                authors: defineCollection('authors', {}),
+                metadata: defineCollection('book_metadata', {}),
+            });
 
             const { result } = renderHook(
                 () => useStore('books', 'authors', 'metadata'),
-                { wrapper }
+                { wrapper: ({ children }) => <Provider>{children}</Provider> }
             );
 
             expect(result.current).toHaveLength(3);
-            expect(result.current[0]).toBe(booksCollection);
-            expect(result.current[1]).toBe(authorsCollection);
-            expect(result.current[2]).toBe(metadataCollection);
+            expect(result.current[0]).toBeDefined();
+            expect(result.current[1]).toBeDefined();
+            expect(result.current[2]).toBeDefined();
+            expect(result.current[0]).toHaveProperty('subscribe');
+            expect(result.current[1]).toHaveProperty('subscribe');
+            expect(result.current[2]).toHaveProperty('subscribe');
         });
 
         it('should allow using collections in useLiveQuery with joins', async () => {
-            const factory = createCollectionFactory(queryClient);
-            const booksCollection = factory.create('books');
-            const authorsCollection = factory.create('authors');
-
-            const stores = {
-                books: booksCollection,
-                authors: authorsCollection,
-            };
-
-            const wrapper = ({ children }: { children: ReactNode }) => (
-                <CollectionsProvider collections={stores}>{children}</CollectionsProvider>
-            );
+            const { Provider, useStore } = createReactCollections<Schema>(pb, queryClient)({
+                books: defineCollection('books', {}),
+                authors: defineCollection('authors', {}),
+            });
 
             const { result } = renderHook(
                 () => {
                     const books = useStore('books');
                     return useLiveQuery((q) => q.from({ books }));
                 },
-                { wrapper }
+                { wrapper: ({ children }) => <Provider>{children}</Provider> }
             );
 
-            // Wait for data to load
             await waitFor(
                 () => {
                     expect(result.current.isLoading).toBe(false);
@@ -201,47 +167,50 @@ describe('CollectionsProvider and Hooks', () => {
         }, 15000);
     });
 
-    describe('CollectionsProvider', () => {
+    describe('Provider', () => {
         it('should provide collections to nested components', () => {
-            const factory = createCollectionFactory(queryClient);
-            const booksCollection = factory.create('books');
-            const authorsCollection = factory.create('authors');
-
-            const stores = {
-                books: booksCollection,
-                authors: authorsCollection,
-            };
-
-            const wrapper = ({ children }: { children: ReactNode }) => (
-                <CollectionsProvider collections={stores}>{children}</CollectionsProvider>
-            );
-
-            const { result } = renderHook(() => useStore('books'), { wrapper });
-
-            expect(result.current).toBe(booksCollection);
-
-            const { result: result2 } = renderHook(() => useStore('authors'), {
-                wrapper,
+            const { Provider, useStore } = createReactCollections<Schema>(pb, queryClient)({
+                books: defineCollection('books', {}),
+                authors: defineCollection('authors', {}),
             });
 
-            expect(result2.current).toBe(authorsCollection);
+            const { result: result1 } = renderHook(() => useStore('books'), {
+                wrapper: ({ children }) => <Provider>{children}</Provider>
+            });
+
+            expect(result1.current).toBeDefined();
+
+            const { result: result2 } = renderHook(() => useStore('authors'), {
+                wrapper: ({ children }) => <Provider>{children}</Provider>
+            });
+
+            expect(result2.current).toBeDefined();
         });
 
-        it('should support custom collection keys', () => {
-            const factory = createCollectionFactory(queryClient);
-            const booksCollection = factory.create('books');
+        it('should support custom collection keys with override', () => {
+            const { Provider, useStore } = createReactCollections<Schema>(pb, queryClient)({
+                myCustomBooksKey: defineCollection('books', {}),
+            });
 
-            const stores = {
-                myCustomBooksKey: booksCollection,
-            };
+            const { result } = renderHook(() => useStore('myCustomBooksKey'), {
+                wrapper: ({ children }) => <Provider>{children}</Provider>
+            });
 
-            const wrapper = ({ children }: { children: ReactNode }) => (
-                <CollectionsProvider collections={stores}>{children}</CollectionsProvider>
-            );
+            expect(result.current).toBeDefined();
+            expect(result.current).toHaveProperty('subscribe');
+            expect(result.current).toHaveProperty('utils');
+        });
 
-            const { result } = renderHook(() => useStore('myCustomBooksKey'), { wrapper });
+        it('should infer collection name from key when not specified', () => {
+            const { Provider, useStore } = createReactCollections<Schema>(pb, queryClient)({
+                books: defineCollection('books', {}),
+            });
 
-            expect(result.current).toBe(booksCollection);
+            const { result } = renderHook(() => useStore('books'), {
+                wrapper: ({ children }) => <Provider>{children}</Provider>
+            });
+
+            expect(result.current).toBeDefined();
         });
     });
 

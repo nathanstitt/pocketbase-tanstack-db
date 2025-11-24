@@ -117,15 +117,12 @@ describe('Collection - Relations', () => {
 
         // Type checking: These should compile without errors
         // The expand property exists in the type even if undefined at runtime
-        if (firstBook.expand) {
-            if (firstBook.expand.author) {
-                const authorName: string = firstBook.expand.author.name
-                expect(authorName).toBeTypeOf('string')
-            }
-        }
+        expect(firstBook.expand).toBeDefined()
 
-        // This test primarily validates type safety - the expand parameter is type-checked
-        expect(true).toBe(true)
+        const authorName: string | undefined = firstBook.expand?.author?.name
+        expect(authorName).toBeTypeOf('string')
+
+
     })
 
     it('should filter on nested relation fields', async () => {

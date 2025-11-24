@@ -49,8 +49,7 @@ npm install pocketbase-tanstack-db pocketbase @tanstack/react-query @tanstack/re
 
 ### 1. Define Your Schema
 
-Create type-safe schema definitions for your PocketBase collections.  The schema should be formed like the below, it's recommended
-that you install https://github.com/satohshi/pocketbase-schema-generator as a pocketbase hook.  When configured a schema file will be auto-generated on every schema change.
+Create type-safe schema definitions for your PocketBase collections. It's recommended that you install https://github.com/satohshi/pocketbase-schema-generator as a pocketbase hook - when configured, a schema file will be auto-generated on every schema change.
 
 ```typescript
 import type { SchemaDeclaration } from 'pocketbase-tanstack-db';
@@ -75,34 +74,26 @@ interface Book {
 }
 
 // Create schema declaration
-interface MySchema extends SchemaDeclaration {
+type MySchema = {
     authors: {
-        Row: Author;
-        Relations: {
-            forward: {};
-            back: {
-                books: ['books', true]; // One-to-many relation
-            };
-        };
+        type: Author;
+        relations: {};
     };
     books: {
-        Row: Book;
-        Relations: {
-            forward: {
-                author: ['authors', false]; // Many-to-one relation
-            };
-            back: {};
+        type: Book;
+        relations: {
+            author: Author;
         };
     };
 }
 ```
 
-### 2. Initialize PocketBase and Collections
+### 2. Create React Collections
 
 ```typescript
 import PocketBase from 'pocketbase';
-import { QueryClient } from '@tanstack/react-query';
-import { CollectionFactory } from 'pocketbase-tanstack-db';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { createReactCollections, defineCollection } from 'pocketbase-tanstack-db';
 
 // Initialize PocketBase
 const pb = new PocketBase('http://localhost:8090');
@@ -116,12 +107,24 @@ const queryClient = new QueryClient({
     },
 });
 
-// Create collection factory
-const factory = new CollectionFactory<MySchema>(pb, queryClient);
+// Create typed collections - automatic type inference!
+const { Provider, useStore } = createReactCollections<MySchema>(pb, queryClient)({
+    authors: defineCollection('authors', {}),
+    books: defineCollection('books', {
+        expand: 'author' as const  // Type-safe expand
+    }),
+});
 
-// Create collections
-const authorsCollection = factory.create('authors');
-const booksCollection = factory.create('books');
+// Wrap your app
+function App() {
+    return (
+        <QueryClientProvider client={queryClient}>
+            <Provider>
+                <BooksList />
+            </Provider>
+        </QueryClientProvider>
+    );
+}
 ```
 
 ### 3. Use in React Components
@@ -130,16 +133,22 @@ const booksCollection = factory.create('books');
 import { useLiveQuery } from '@tanstack/react-db';
 
 function BooksList() {
-    const { data: books, isLoading } = useLiveQuery((q) =>
-        q.from({ books: booksCollection })
+    const books = useStore('books');  // ✅ Fully typed!
+
+    const { data, isLoading } = useLiveQuery((q) =>
+        q.from({ books })
     );
 
     if (isLoading) return <div>Loading...</div>;
 
     return (
         <ul>
-            {books?.map(book => (
-                <li key={book.id}>{book.title}</li>
+            {data?.map(book => (
+                <li key={book.id}>
+                    {book.title}
+                    {/* Expanded relation is fully typed! */}
+                    {book.expand?.author && ` by ${book.expand.author.name}`}
+                </li>
             ))}
         </ul>
     );
@@ -268,74 +277,91 @@ const booksCollection = factory.create('books', {
 });
 ```
 
-### React Provider
+### React Integration
 
-Provide collections to your React component tree.
+#### createReactCollections()
 
-#### CollectionsProvider
+Creates a fully typed React integration for PocketBase collections with automatic type inference.
 
 ```typescript
-<CollectionsProvider collections={collectionsMap}>
-    {children}
-</CollectionsProvider>
+const { Provider, useStore } = createReactCollections<Schema>(
+    pb: PocketBase,
+    queryClient: QueryClient,
+    config: CollectionsConfig
+)
 ```
+
+**Parameters:**
+- `pb` - PocketBase instance
+- `queryClient` - TanStack Query QueryClient instance
+- `config` - Object mapping keys to collection configurations
+
+**Returns:**
+- `Provider` - React Context Provider component
+- `useStore` - Hook to access collections (supports single and variadic access)
 
 **Example:**
 ```typescript
-import { CollectionsProvider } from 'pocketbase-tanstack-db';
+import { createReactCollections, defineCollection } from 'pocketbase-tanstack-db';
 
-const collections = {
-    authors: factory.create('authors'),
-    books: factory.create('books'),
-};
+const { Provider, useStore } = createReactCollections<MySchema>(pb, queryClient)({
+    authors: defineCollection('authors', {}),
+    books: defineCollection('books', {
+        expand: 'author' as const
+    }),
+});
 
-function App() {
-    return (
-        <CollectionsProvider collections={collections}>
-            <BooksList />
-        </CollectionsProvider>
-    );
-}
+// Wrap your app
+<Provider>
+    <App />
+</Provider>
+```
+
+**With custom collection key:**
+```typescript
+const { Provider, useStore } = createReactCollections<MySchema>(pb, queryClient)({
+    myBooks: defineCollection('books', {  // Key 'myBooks', collection 'books'
+        expand: 'author' as const
+    })
+});
+
+// Access via custom key
+const myBooks = useStore('myBooks');
 ```
 
 #### useStore()
 
-Access a single collection from the provider.
+Access collections from the provider. Automatically typed based on your config.
 
+**Single collection:**
 ```typescript
-const collection = useStore<RecordType>(key: string)
+const collection = useStore('key')
 ```
 
-**Example:**
+**Multiple collections (variadic):**
+```typescript
+const [col1, col2, col3] = useStore('key1', 'key2', 'key3')
+```
+
+**Examples:**
 ```typescript
 function BooksList() {
-    const booksCollection = useStore<Book>('books');
+    const books = useStore('books');  // ✅ Typed automatically!
 
     const { data } = useLiveQuery((q) =>
-        q.from({ books: booksCollection })
+        q.from({ books })
     );
 
     return <div>{/* ... */}</div>;
 }
-```
 
-#### useStore() with multiple keys
-
-Access multiple collections at once using variadic arguments.
-
-```typescript
-const [col1, col2] = useStore('key1', 'key2')
-```
-
-**Example:**
-```typescript
 function BooksWithAuthors() {
-    const [booksCollection, authorsCollection] = useStore('books', 'authors');
+    const [books, authors] = useStore('books', 'authors');  // ✅ Variadic!
 
     const { data } = useLiveQuery((q) =>
-        q.from({ book: booksCollection })
+        q.from({ book: books })
             .join(
-                { author: authorsCollection },
+                { author: authors },
                 ({ book, author }) => eq(book.author, author.id),
                 'left'
             )
@@ -1087,29 +1113,34 @@ const { data } = useLiveQuery((q) =>
 );
 ```
 
-### 2. Use Provider for App-Wide Collections
+### 2. Define Collections Once with createReactCollections
 
 ```typescript
-// ✅ Define collections once
-const collections = {
-    books: factory.create('books'),
-    authors: factory.create('authors'),
-};
+// ✅ Define collections once with automatic type inference
+const { Provider, useStore } = createReactCollections<MySchema>(pb, queryClient)({
+    books: defineCollection('books', { expand: 'author' as const }),
+    authors: defineCollection('authors', {}),
+});
 
 // Use throughout app
-<CollectionsProvider collections={collections}>
+<Provider>
     <App />
-</CollectionsProvider>
+</Provider>
+
+// No manual type declarations needed - fully typed automatically!
 ```
 
-### 3. Type Your Hooks
+### 3. Collections are Automatically Typed
 
 ```typescript
-// ✅ Single collection
-const booksCollection = useStore('books');
+// ✅ Types inferred from createReactCollections config
+const books = useStore('books');  // Fully typed!
 
 // ✅ Multiple collections with variadic arguments
-const [books, authors] = useStore('books', 'authors');
+const [books, authors] = useStore('books', 'authors');  // Fully typed array!
+
+// ❌ TypeScript error: key doesn't exist in config
+const invalid = useStore('nonexistent');  // Compile error!
 ```
 
 ### 4. Handle Loading and Error States

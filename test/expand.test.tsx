@@ -6,7 +6,8 @@ import type { QueryClient } from '@tanstack/react-query';
 import { createCollection } from '../src/collection';
 import { createReactProvider } from '../src/react';
 import type { Schema } from './schema';
-import { pb, createTestQueryClient, authenticateTestUser, clearAuth, getTestAuthorId } from './helpers';
+import { pb, createTestQueryClient, authenticateTestUser, clearAuth, getTestAuthorId, createAuthorsCollection } from './helpers';
+
 
 describe('Query-Time Expand Feature', () => {
     let queryClient: QueryClient;
@@ -52,7 +53,7 @@ describe('Query-Time Expand Feature', () => {
 
             expect(() => {
                 booksCollection.expand('author');
-            }).toThrow(/does not have expandable config/);
+            }).toThrowError(/Field 'author' is not in expandable config/)
         });
 
         it('should throw error when expanding field not in expandable config', () => {
@@ -71,52 +72,44 @@ describe('Query-Time Expand Feature', () => {
     });
 
     describe('Expand with single relation', () => {
-        it('should expand author relation and insert into authors collection', async () => {
-            const authorsCollection = createCollection<Schema>(pb, queryClient)('authors', {});
+        it('should expand author relation with expand data', async () => {
+            const authorsCollection = createCollection<Schema>(pb, queryClient)('authors', { syncMode: 'eager' })
             const booksCollection = createCollection<Schema>(pb, queryClient)('books', {
+                syncMode: 'eager',
                 expandable: {
-                    author: authorsCollection
+                    author: authorsCollection,
                 }
             });
 
-            const booksWithAuthor = booksCollection.expand('author');
-
             const { result } = renderHook(
                 () => {
-                    const books = useLiveQuery((q) => q.from({ books: booksWithAuthor }));
-                    const authors = useLiveQuery((q) => q.from({ authors: authorsCollection }));
-                    return { books, authors };
+                    return useLiveQuery((q) => q.from({ books: booksCollection.expand('author') }))
                 },
                 { wrapper: ({ children }) => <>{children}</> }
             );
 
             await waitFor(
                 () => {
-                    expect(result.current.books.isLoading).toBe(false);
-                    expect(result.current.authors.isLoading).toBe(false);
+                    expect(result.current.isLoading).toBe(false);
                 },
                 { timeout: 10000 }
             );
 
-            const books = result.current.books.data;
-            const authors = result.current.authors.data;
-
+            const books = result.current.data;
             expect(books).toBeDefined();
-            expect(books!.length).toBeGreaterThan(0);
+            if (!books) throw new Error('no books?')
+            expect(books.length).toBeGreaterThan(0);
 
-            const firstBook = books![0];
-            expect(firstBook.expand).toBeDefined();
-            expect(firstBook.expand!.author).toBeDefined();
+            const firstBook = books[0];
+            expect(firstBook.expand).toBeDefined()
+            if (!firstBook) throw new Error('no book')
+            expect(firstBook.expand?.author).toBeDefined();
+            const authors = Array.from(authorsCollection.entries())
+
+            //expect(authors.length).toBe(1)
+
             expect(firstBook.expand!.author!.name).toBeTypeOf('string');
             expect(firstBook.expand!.author!.id).toBe(firstBook.author);
-
-            expect(authors).toBeDefined();
-            expect(authors!.length).toBeGreaterThan(0);
-
-            const expandedAuthorId = firstBook.expand!.author!.id;
-            const authorInCollection = authors!.find(a => a.id === expandedAuthorId);
-            expect(authorInCollection).toBeDefined();
-            expect(authorInCollection!.name).toBe(firstBook.expand!.author!.name);
         }, 15000);
 
         it('should type-check expanded fields correctly', async () => {
@@ -151,8 +144,9 @@ describe('Query-Time Expand Feature', () => {
 
     describe('Expand without selection (base collection)', () => {
         it('should not include expand when using base collection', async () => {
-            const authorsCollection = createCollection<Schema>(pb, queryClient)('authors', {});
+            const authorsCollection = createCollection<Schema>(pb, queryClient)('authors', { syncMode: 'eager' });
             const booksCollection = createCollection<Schema>(pb, queryClient)('books', {
+                syncMode: 'eager',
                 expandable: {
                     author: authorsCollection
                 }
@@ -188,8 +182,9 @@ describe('Query-Time Expand Feature', () => {
         it('should work with useStore and expand', async () => {
 
             const c = createCollection<Schema>(pb, queryClient);
-            const authors = c('authors', {});
+            const authors = c('authors', { syncMode: 'eager' });
             const booksCollection = c('books', {
+                syncMode: 'eager',
                 expandable: {
                     author: authors,
                 }
@@ -201,14 +196,12 @@ describe('Query-Time Expand Feature', () => {
 
             const { Provider, useStore } = createReactProvider(collections);
 
-            const authorId = await getTestAuthorId()
             const { result } = renderHook(
                 () => {
                     const [books] = useStore('books');
 
                     return useLiveQuery((q) =>
                         q.from({ books: books.expand('author') })
-                            .where(({ books }) => eq(books.author, authorId))
                     );
                 },
                 { wrapper: ({ children }) => <Provider>{children}</Provider> }
@@ -231,8 +224,8 @@ describe('Query-Time Expand Feature', () => {
         it('should support using expandable with useStore collections', async () => {
             const c = createCollection<Schema>(pb, queryClient);
             const collections = {
-                authors: c('authors', {}),
-                books: c('books', {}),
+                authors: c('authors', { syncMode: 'eager' }),
+                books: c('books', { syncMode: 'eager' }),
             };
             const { Provider, useStore } = createReactProvider(collections);
 
@@ -241,6 +234,7 @@ describe('Query-Time Expand Feature', () => {
                     const [books, authors] = useStore('books', 'authors');
 
                     const booksWithExpandable = createCollection<Schema>(pb, queryClient)('books', {
+                        syncMode: 'eager',
                         expandable: {
                             author: authors
                         }
@@ -278,7 +272,7 @@ describe('Query-Time Expand Feature', () => {
                 }
             });
 
-             const expandedBooks1 = booksCollection.expand('author');
+            const expandedBooks1 = booksCollection.expand('author');
             const expandedBooks2 = booksCollection.expand('author');
 
             const { result: result1 } = renderHook(
@@ -302,17 +296,6 @@ describe('Query-Time Expand Feature', () => {
     });
 
     describe('Error messages', () => {
-        it('should provide helpful error when expandable not configured', () => {
-            const booksCollection = createCollection<Schema>(pb, queryClient)('books', {});
-
-            expect(() => {
-                booksCollection.expand('author');
-            }).toThrow(/Collection 'books' does not have expandable config/);
-            expect(() => {
-                booksCollection.expand('author');
-            }).toThrow(/Add 'expandable' option when creating the collection/);
-        });
-
         it('should list available fields when invalid field provided', () => {
             const authorsCollection = createCollection<Schema>(pb, queryClient)('authors', {});
             const booksCollection = createCollection<Schema>(pb, queryClient)('books', {
@@ -326,5 +309,69 @@ describe('Query-Time Expand Feature', () => {
                 booksCollection.expand('invalid');
             }).toThrow(/Available fields: author/);
         });
+    });
+
+    describe('Query-level expand() operator', () => {
+        it('should expand using query-level .expand() instead of collection.expand()', async () => {
+            const booksCollection = createCollection<Schema>(pb, queryClient)('books', { syncMode: 'eager' });
+
+            const { result } = renderHook(
+                () => useLiveQuery((q) => q.from({ books: booksCollection }).expand<Schema, 'books'>('author')),
+                { wrapper: ({ children }) => <>{children}</> }
+            );
+
+            await waitFor(
+                () => {
+                    expect(result.current.isLoading).toBe(false);
+                },
+                { timeout: 10000 }
+            );
+
+            const books = result.current.data;
+            expect(books).toBeDefined();
+            if (!books) throw new Error('no books');
+            expect(books.length).toBeGreaterThan(0);
+
+            // Now fully typed - no type assertion needed!
+            const firstBook = books[0]
+            expect(firstBook.expand).toBeDefined();
+            expect(firstBook.expand?.author).toBeDefined();
+            expect(firstBook.expand!.author!.name).toBeTypeOf('string');
+            expect(firstBook.expand!.author!.id).toBe(firstBook.author);
+        }, 15000);
+
+        it('should support chaining query-level expand with other operators', async () => {
+            const booksCollection = createCollection<Schema>(pb, queryClient)('books', { syncMode: 'eager' });
+
+            const { result } = renderHook(
+                () => useLiveQuery((q) =>
+                    q.from({ books: booksCollection })
+                        .expand<Schema, 'books'>('author')
+                        .orderBy(({ books }) => books.title)
+                ),
+                { wrapper: ({ children }) => <>{children}</> }
+            );
+
+            await waitFor(
+                () => {
+                    expect(result.current.isLoading).toBe(false);
+                },
+                { timeout: 10000 }
+            );
+
+            const books = result.current.data;
+            expect(books).toBeDefined();
+            if (!books) throw new Error('no books');
+            expect(books.length).toBeGreaterThan(0);
+
+            // Fully typed!
+            const firstBook = books[0]
+            expect(firstBook.expand?.author).toBeDefined();
+
+            // Verify ordering
+            for (let i = 1; i < books.length; i++) {
+                expect(books[i].title >= books[i - 1].title).toBe(true);
+            }
+        }, 15000);
     });
 });

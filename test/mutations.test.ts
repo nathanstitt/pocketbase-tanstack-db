@@ -207,7 +207,7 @@ describe('Collection - Mutations', () => {
         })
 
         const factory = createCollectionFactory(queryClient)
-        const collection = factory.create('books')
+        const collection = factory.create('books', { syncMode: 'eager' })
 
         const { result } = renderHook(() => useLiveQuery((q) => q.from({ books: collection })))
 
@@ -495,6 +495,7 @@ describe('Collection - Mutations', () => {
     it('should handle insert and delete in same batch (optimistic cancellation)', async () => {
         const factory = createCollectionFactory(queryClient)
         const collection = factory.create('books', {
+            syncMode: 'eager',
             onInsert: async () => {},
             onUpdate: async () => {},
             onDelete: async () => {},

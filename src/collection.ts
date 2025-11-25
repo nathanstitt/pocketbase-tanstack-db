@@ -1,8 +1,11 @@
 import PocketBase from 'pocketbase';
-import { createCollection as createTanStackCollection, type Collection } from "@tanstack/db"
+import { createCollection as createTanStackCollection, type Collection, type LoadSubsetOptions } from "@tanstack/react-db"
 import { queryCollectionOptions } from "@tanstack/query-db-collection"
 import { QueryClient } from '@tanstack/react-query'
 import { SubscriptionManager } from './subscription-manager';
+import { convertToPocketBaseFilter, convertToPocketBaseSort } from './pocketbase-query-converter';
+import './query-builder-extensions';
+import { getCollectionExpand } from './query-builder-extensions';
 import type {
     SchemaDeclaration,
     SubscribableCollection,
@@ -24,6 +27,14 @@ export type {
     RelationsConfig,
 } from './types';
 
+
+/**
+ * Extended LoadSubsetOptions that includes PocketBase-specific expand parameter.
+ * @internal
+ */
+type ExtendedLoadSubsetOptions = LoadSubsetOptions & {
+    pbExpand?: string;
+};
 
 /**
  * Inferred type for a single collection from config.
@@ -52,6 +63,9 @@ type InferCollectionType<
  * Extracted from the old CollectionFactory.create() method.
  * @internal
  */
+
+// class Extended
+
 function createSingleCollection<
     Schema extends SchemaDeclaration,
     C extends keyof Schema & string,
@@ -65,48 +79,76 @@ function createSingleCollection<
 ): InferCollectionType<Schema, C, Opts> {
     type RecordType = ExtractRecordType<Schema, C>;
 
-    const baseCollection = createTanStackCollection(
-        queryCollectionOptions<RecordType>({
-            queryKey: [collectionName],
-            queryFn: async () => {
+    // Mutable reference to store the collection once created
+    // This allows queryFn to access the collection for WeakMap lookups
+    let collectionRef: any = null;
+
+    const collectionOptions = queryCollectionOptions<RecordType>({
+        queryClient,
+        queryKey: [collectionName],
+        syncMode: options?.syncMode ?? 'on-demand',
+        queryFn: async (ctx) => {
+            const loadOptions = ctx.meta?.loadSubsetOptions as ExtendedLoadSubsetOptions | undefined;
+            const filter = convertToPocketBaseFilter(loadOptions?.where);
+            const sort = convertToPocketBaseSort(loadOptions?.orderBy);
+            const limit = loadOptions?.limit;
+            // Check for expand from collection's WeakMap (set by query-level .expand())
+            const queryLevelExpand = collectionRef ? getCollectionExpand(collectionRef) : undefined;
+            const expand = loadOptions?.pbExpand || queryLevelExpand;
+
+            if (!filter && !sort && !limit && !expand) {
                 const result = await pb
                     .collection(collectionName)
                     .getFullList();
-
                 return result as unknown as RecordType[];
-            },
-            queryClient: queryClient,
-            getKey: (item: RecordType) => (item as { id: string }).id,
-            startSync: options?.startSync ?? false,
-            onInsert: options?.onInsert === false ? undefined : options?.onInsert ?? (async ({ transaction }) => {
-                await Promise.all(
-                    transaction.mutations.map(async (mutation) => {
-                        const { id, created, updated, collectionId, collectionName: _, ...data } = mutation.modified as Record<string, unknown>;
-                        await pb.collection(collectionName).create(data);
-                    })
-                );
-                await queryClient.invalidateQueries({ queryKey: [collectionName] });
-            }),
-            onUpdate: options?.onUpdate === false ? undefined : options?.onUpdate ?? (async ({ transaction }) => {
-                await Promise.all(
-                    transaction.mutations.map(async (mutation) => {
-                        const recordWithId = mutation.original as { id: string };
-                        await pb.collection(collectionName).update(recordWithId.id, mutation.changes);
-                    })
-                );
-                await queryClient.invalidateQueries({ queryKey: [collectionName] });
-            }),
-            onDelete: options?.onDelete === false ? undefined : options?.onDelete ?? (async ({ transaction }) => {
-                await Promise.all(
-                    transaction.mutations.map(async (mutation) => {
-                        const recordWithId = mutation.original as { id: string };
-                        await pb.collection(collectionName).delete(recordWithId.id);
-                    })
-                );
-                await queryClient.invalidateQueries({ queryKey: [collectionName] });
-            }),
-        })
-    );
+            }
+
+            const result = await pb
+                .collection(collectionName)
+                .getList(1, limit || 500, {
+                    filter,
+                    sort,
+                    expand,
+                });
+            return result.items as unknown as RecordType[];
+        },
+        getKey: (item: RecordType) => {
+            const record = item as any;
+            if (!record || typeof record !== 'object' || !('id' in record)) {
+                throw new Error(`Record in collection '${collectionName}' is missing required 'id' field. Received: ${JSON.stringify(item)}`);
+            }
+            return record.id;
+        },
+        onInsert: options?.onInsert === false ? undefined : options?.onInsert ?? (async ({ transaction }) => {
+            await Promise.all(
+                transaction.mutations.map(async (mutation) => {
+                    const { id, created, updated, collectionId, collectionName: _, ...data } = mutation.modified as Record<string, unknown>;
+                    await pb.collection(collectionName).create(data);
+                })
+            );
+        }),
+        onUpdate: options?.onUpdate === false ? undefined : options?.onUpdate ?? (async ({ transaction }) => {
+            await Promise.all(
+                transaction.mutations.map(async (mutation) => {
+                    const recordWithId = mutation.original as { id: string };
+                    await pb.collection(collectionName).update(recordWithId.id, mutation.changes);
+                })
+            );
+        }),
+        onDelete: options?.onDelete === false ? undefined : options?.onDelete ?? (async ({ transaction }) => {
+            await Promise.all(
+                transaction.mutations.map(async (mutation) => {
+                    const recordWithId = mutation.original as { id: string };
+                    await pb.collection(collectionName).delete(recordWithId.id);
+                })
+            );
+        }),
+    });
+
+    const baseCollection = createTanStackCollection(collectionOptions);
+
+    // Set the collection reference for queryFn to use
+    collectionRef = baseCollection;
 
     const subscribableCollection = Object.assign(baseCollection, {
         subscribe: async (recordId?: string) => {
@@ -125,74 +167,64 @@ function createSingleCollection<
             await subscriptionManager.waitForSubscription(collectionName, recordId, timeoutMs);
         },
         relations: options?.relations || {} as RelationsConfig<Schema, C>,
+        // Internal method for query-level expand (no validation)
+        __expandInternal: (fields: string[]) => {
+            return createExpandedCollection(pb, queryClient, collectionName, fields);
+        },
         expand: <Fields extends (keyof ExtractRelations<Schema, C> & string)[]>(
             ...fields: Fields
         ): Collection<WithExpandFromArray<RecordType, Schema, C, Fields>> => {
-            if (!options?.expandable) {
-                throw new Error(
-                    `Collection '${collectionName}' does not have expandable config. ` +
-                    `Add 'expandable' option when creating the collection.`
-                );
-            }
-
-            const expandableConfig = options.expandable;
-            const sortedFields = [...fields].sort();
-            const expandString = sortedFields.join(',');
-
+            const expandableKeys = Object.keys(options?.expandable || []);
             for (const field of fields) {
-                if (!(field in expandableConfig)) {
+                if (!expandableKeys.includes(field)) {
                     throw new Error(
-                        `Field '${String(field)}' is not in expandable config for collection '${collectionName}'. ` +
-                        `Available fields: ${Object.keys(expandableConfig).join(', ')}`
+                        `Field '${field}' is not in expandable config for collection '${collectionName}'. ` +
+                            `Available fields: ${expandableKeys.join(', ')}`
                     );
                 }
             }
 
+            const sortedFields = [...fields].sort();
+            const expandString = sortedFields.join(',');
+
             type ExpandedRecordType = WithExpandFromArray<RecordType, Schema, C, Fields>;
 
-            const expandedCollection = createTanStackCollection(
-                queryCollectionOptions<ExpandedRecordType>({
-                    queryKey: [collectionName, { expand: expandString }],
-                    queryFn: async () => {
-                        const records = await pb
+            const expandedCollectionOptions = queryCollectionOptions<ExpandedRecordType>({
+                queryClient,
+                queryKey: [collectionName, 'expand', expandString],
+                syncMode: options?.syncMode ?? 'on-demand',
+                queryFn: async (ctx) => {
+                    const loadOptions = ctx.meta?.loadSubsetOptions as ExtendedLoadSubsetOptions | undefined;
+                    const filter = convertToPocketBaseFilter(loadOptions?.where);
+                    const sort = convertToPocketBaseSort(loadOptions?.orderBy);
+                    const limit = loadOptions?.limit;
+                    const queryExpand = loadOptions?.pbExpand;
+
+                    // Query-level expand takes precedence over collection-level expand
+                    const finalExpand = queryExpand || expandString;
+
+                    if (!filter && !sort && !limit && !queryExpand) {
+                        const result = await pb
                             .collection(collectionName)
-                            .getFullList({ expand: expandString });
+                            .getFullList({ expand: finalExpand });
+                        return result as unknown as ExpandedRecordType[];
+                    }
 
-                        for (const record of records) {
-                            const typedRecord = record as unknown as ExpandedRecordType;
-                            if (typedRecord.expand) {
-                                for (const field of fields) {
-                                    const expandedData = typedRecord.expand[field as keyof typeof typedRecord.expand];
-                                    const targetCollection = expandableConfig[field];
+                    const result = await pb
+                        .collection(collectionName)
+                        .getList(1, limit || 500, {
+                            filter,
+                            sort,
+                            expand: finalExpand,
+                        });
+                    return result.items as unknown as ExpandedRecordType[];
+                },
+                getKey: (item: ExpandedRecordType) => (item as { id: string }).id,
+            });
 
-                                    if (!expandedData || !targetCollection) continue;
+            const expandedCollection = createTanStackCollection(expandedCollectionOptions);
 
-                                    try {
-                                        if (Array.isArray(expandedData)) {
-                                            for (const item of expandedData) {
-                                                targetCollection.utils.writeInsert(item);
-                                            }
-                                        } else {
-                                            targetCollection.utils.writeInsert(expandedData);
-                                        }
-                                    } catch (error) {
-                                        if (error instanceof Error && !error.message.includes('Sync not initialized')) {
-                                            throw error;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        return records as unknown as ExpandedRecordType[];
-                    },
-                    queryClient: queryClient,
-                    getKey: (item: ExpandedRecordType) => (item as { id: string }).id,
-                    startSync: options?.startSync ?? false,
-                })
-            );
-
-            return expandedCollection as any;
+            return expandedCollection;
         }
     });
 
@@ -209,6 +241,52 @@ function createSingleCollection<
     });
 
     return subscribableCollection as any;
+}
+
+/**
+ * Creates an expanded collection without expandable config validation.
+ * Used by query-level expand() operator.
+ * @internal
+ */
+export function createExpandedCollection<T extends object>(
+    pb: PocketBase,
+    queryClient: QueryClient,
+    collectionName: string,
+    expandFields: string[]
+): Collection<T> {
+    const sortedFields = [...expandFields].sort();
+    const expandString = sortedFields.join(',');
+
+    const expandedCollectionOptions = queryCollectionOptions<T>({
+        queryClient,
+        queryKey: [collectionName, 'expand', expandString],
+        syncMode: 'on-demand',
+        queryFn: async (ctx) => {
+            const loadOptions = ctx.meta?.loadSubsetOptions as ExtendedLoadSubsetOptions | undefined;
+            const filter = convertToPocketBaseFilter(loadOptions?.where);
+            const sort = convertToPocketBaseSort(loadOptions?.orderBy);
+            const limit = loadOptions?.limit;
+
+            if (!filter && !sort && !limit) {
+                const result = await pb
+                    .collection(collectionName)
+                    .getFullList({ expand: expandString });
+                return result as unknown as T[];
+            }
+
+            const result = await pb
+                .collection(collectionName)
+                .getList(1, limit || 500, {
+                    filter,
+                    sort,
+                    expand: expandString,
+                });
+            return result.items as unknown as T[];
+        },
+        getKey: (item: T) => (item as { id: string }).id,
+    });
+
+    return createTanStackCollection(expandedCollectionOptions);
 }
 
 /**

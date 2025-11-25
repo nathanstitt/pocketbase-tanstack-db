@@ -56,7 +56,7 @@ describe('Collection - Real-time Subscriptions', () => {
     })
 
     it('should receive real-time create events', async () => {
-        const booksCollection = createBooksCollection(queryClient)
+        const booksCollection = createBooksCollection(queryClient, { syncMode: 'eager' })
 
         // Set up the live query first
         const { result } = renderHook(() =>
@@ -110,7 +110,7 @@ describe('Collection - Real-time Subscriptions', () => {
     }, 15000)
 
     it('should receive real-time update events', async () => {
-        const booksCollection = createBooksCollection(queryClient)
+        const booksCollection = createBooksCollection(queryClient, { syncMode: 'eager' })
 
         // Create a test book
         const authorId = await getTestAuthorId()
@@ -170,7 +170,7 @@ describe('Collection - Real-time Subscriptions', () => {
     }, 15000)
 
     it('should receive real-time delete events', async () => {
-        const booksCollection = createBooksCollection(queryClient)
+        const booksCollection = createBooksCollection(queryClient, { syncMode: 'eager' })
 
         // Create a test book
         const authorId = await getTestAuthorId()
@@ -580,9 +580,10 @@ describe('Collection - Real-time Subscriptions', () => {
     it('should respect startSync: true option (eager sync)', async () => {
         const factory = createCollectionFactory(queryClient)
 
-        // Create collection with startSync: true for eager sync
+        // Create collection with startSync: true and syncMode: 'eager' for eager sync
         const booksCollection = factory.create('books', {
-            startSync: true
+            startSync: true,
+            syncMode: 'eager'
         })
 
         // Give it a moment for eager sync to trigger

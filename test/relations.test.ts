@@ -6,6 +6,7 @@ import { afterAll, beforeAll, beforeEach, afterEach, describe, expect, it } from
 import type { QueryClient } from '@tanstack/react-query'
 
 import { pb, createTestQueryClient, authenticateTestUser, clearAuth, createCollectionFactory } from './helpers'
+import type { Schema } from './schema'
 
 describe('Collection - Relations', () => {
     let queryClient: QueryClient
@@ -30,8 +31,8 @@ describe('Collection - Relations', () => {
         const factory = createCollectionFactory(queryClient)
 
         // Create collections with relations config
-        const authorsCollection = factory.create('authors')
-        const booksCollection = factory.create('books')
+        const authorsCollection = factory.create('authors', { syncMode: 'eager' })
+        const booksCollection = factory.create('books', { syncMode: 'eager' })
 
         const { result } = renderHook(() =>
             useLiveQuery((q) =>
@@ -90,8 +91,9 @@ describe('Collection - Relations', () => {
 
     it('should expand relations when specified with expandable', async () => {
         const factory = createCollectionFactory(queryClient)
-        const authorsCollection = factory.create('authors')
+        const authorsCollection = factory.create('authors', { syncMode: 'eager' })
         const booksCollection = factory.create('books', {
+            syncMode: 'eager',
             expandable: {
                 author: authorsCollection
             }
@@ -126,8 +128,9 @@ describe('Collection - Relations', () => {
 
     it('should filter on nested relation fields', async () => {
         const factory = createCollectionFactory(queryClient)
-        const authorsCollection = factory.create('authors')
+        const authorsCollection = factory.create('authors', { syncMode: 'eager' })
         const booksCollection = factory.create('books', {
+            syncMode: 'eager',
             expandable: {
                 author: authorsCollection
             }
@@ -171,5 +174,105 @@ describe('Collection - Relations', () => {
         result.current.data.forEach(book => {
             expect(book.author).toBe(testAuthorId)
         })
+    })
+
+    it('should expand relations using query-level expand() operator', async () => {
+        const factory = createCollectionFactory(queryClient)
+        const booksCollection = factory.create('books', { syncMode: 'eager' })
+
+        const { result } = renderHook(() =>
+            useLiveQuery((q) =>
+                q.from({ books: booksCollection }).expand<Schema, 'books'>('author')
+            )
+        )
+
+        await waitFor(
+            () => {
+                expect(result.current.isLoading).toBe(false)
+            },
+            { timeout: 5000 }
+        )
+
+        expect(result.current.data).toBeDefined()
+        expect(result.current.data.length).toBeGreaterThan(0)
+
+        // Now fully typed - no type assertion needed!
+        const firstBook = result.current.data[0]
+
+        // Verify expand structure exists
+        expect(firstBook.expand).toBeDefined()
+        expect(firstBook.expand?.author).toBeDefined()
+
+        // Verify author data is populated - all typed!
+        const author = firstBook.expand?.author
+        if (author) {
+            expect(author.id).toBeDefined()
+            expect(author.name).toBeDefined()
+            expect(author.email).toBeDefined()
+        }
+    })
+
+    it('should expand multiple relations using query-level expand() operator', async () => {
+        const factory = createCollectionFactory(queryClient)
+        const booksCollection = factory.create('books', { syncMode: 'eager' })
+
+        const { result } = renderHook(() =>
+            useLiveQuery((q) =>
+                q.from({ books: booksCollection }).expand<Schema, 'books'>('author')
+            )
+        )
+
+        await waitFor(
+            () => {
+                expect(result.current.isLoading).toBe(false)
+            },
+            { timeout: 5000 }
+        )
+
+        expect(result.current.data).toBeDefined()
+        expect(result.current.data.length).toBeGreaterThan(0)
+
+        const firstBook = result.current.data[0]
+
+        // Verify all expanded relations - fully typed!
+        expect(firstBook.expand?.author).toBeDefined()
+    })
+
+    it('should allow chaining expand() with where() and orderBy()', async () => {
+        const factory = createCollectionFactory(queryClient)
+        const booksCollection = factory.create('books')
+
+        // Get test data
+        const allBooks = await pb.collection('books').getList(1, 10)
+        const testGenre = allBooks.items[0].genre
+
+        const { result } = renderHook(() =>
+            useLiveQuery((q) =>
+                q.from({ books: booksCollection })
+                    .expand<Schema, 'books'>('author')
+                    .where(({ books }) => eq(books.genre, testGenre))
+                    .orderBy(({ books }) => books.title)
+            )
+        )
+
+        await waitFor(
+            () => {
+                expect(result.current.isLoading).toBe(false)
+            },
+            { timeout: 5000 }
+        )
+
+        expect(result.current.data).toBeDefined()
+        expect(result.current.data.length).toBeGreaterThan(0)
+
+        // Verify expand works with filtering - fully typed!
+        const firstBook = result.current.data[0]
+        expect(firstBook.genre).toBe(testGenre)
+        expect(firstBook.expand?.author).toBeDefined()
+
+        // Verify ordering
+        for (let i = 1; i < result.current.data.length; i++) {
+            expect(result.current.data[i].title >= result.current.data[i - 1].title).toBe(true)
+        }
     })
 })

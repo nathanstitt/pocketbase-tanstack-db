@@ -77,7 +77,7 @@ describe('createReactProvider', () => {
         it('should allow using collection in useLiveQuery', async () => {
             const c = createCollection<Schema>(pb, queryClient);
             const collections = {
-                books: c('books', {}),
+                books: c('books', { syncMode: 'eager' }),
             };
             const { Provider, useStore } = createReactProvider(collections);
 
@@ -243,9 +243,11 @@ describe('createReactProvider', () => {
         it('should support expandable collections within provider context', async () => {
             const c = createCollection<Schema>(pb, queryClient);
             const authors = c('authors', {
+                syncMode: 'eager',
                 omitOnInsert: ['created']
             });
             const books = c('books', {
+                syncMode: 'eager',
                 omitOnInsert: ['created'],
                 expandable: {
                     author: authors,

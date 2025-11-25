@@ -42,7 +42,7 @@ describe('Collection - Basic Operations', () => {
     }, 10000)
 
     it('should fetch book by isbn using tanstack db collection', async () => {
-        const booksCollection = createBooksCollection(queryClient)
+        const booksCollection = createBooksCollection(queryClient, { syncMode: 'eager' })
 
         const { result } = renderHook(() =>
             useLiveQuery((q) =>

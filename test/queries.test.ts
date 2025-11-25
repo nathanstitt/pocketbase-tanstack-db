@@ -26,7 +26,7 @@ describe('Collection - Query Operators', () => {
     })
 
     it('should filter books using eq operator', async () => {
-        const booksCollection = createBooksCollection(queryClient)
+        const booksCollection = createBooksCollection(queryClient, { syncMode: 'eager' })
 
         // First get all books to find a valid genre
         const allBooks = await pb.collection('books').getList(1, 10)
@@ -57,7 +57,7 @@ describe('Collection - Query Operators', () => {
     })
 
     it('should filter books using gt operator with dates', async () => {
-        const booksCollection = createBooksCollection(queryClient)
+        const booksCollection = createBooksCollection(queryClient, { syncMode: 'eager' })
 
         // Use a date in the past to ensure we get some results
         const pastDate = new Date('2020-01-01')
@@ -86,7 +86,7 @@ describe('Collection - Query Operators', () => {
     })
 
     it('should filter books using gte operator', async () => {
-        const booksCollection = createBooksCollection(queryClient)
+        const booksCollection = createBooksCollection(queryClient, { syncMode: 'eager' })
 
         // Get a job's created date to use as threshold
         const allBooks = await pb.collection('books').getList(1, 1, { sort: '-created' })
@@ -117,7 +117,7 @@ describe('Collection - Query Operators', () => {
     })
 
     it('should filter books using lt operator', async () => {
-        const booksCollection = createBooksCollection(queryClient)
+        const booksCollection = createBooksCollection(queryClient, { syncMode: 'eager' })
 
         // Use a future date to ensure we get some results
         const futureDate = new Date('2030-01-01')
@@ -146,7 +146,7 @@ describe('Collection - Query Operators', () => {
     })
 
     it('should filter books using lte operator', async () => {
-        const booksCollection = createBooksCollection(queryClient)
+        const booksCollection = createBooksCollection(queryClient, { syncMode: 'eager' })
 
         const futureDate = new Date('2030-01-01')
 
@@ -247,7 +247,7 @@ describe('Collection - Query Operators', () => {
     })
 
     it('should sort books by created date descending', async () => {
-        const booksCollection = createBooksCollection(queryClient)
+        const booksCollection = createBooksCollection(queryClient, { syncMode: 'eager' })
 
         const { result } = renderHook(() =>
             useLiveQuery((q) =>

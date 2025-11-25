@@ -612,4 +612,30 @@ export interface CreateCollectionOptions<
      * ```
      */
     onDelete?: DeleteMutationFn<ExtractRecordType<Schema, CollectionName>> | false;
+
+    /**
+     * Sync mode for the collection. Controls when and how data is fetched from PocketBase.
+     *
+     * - `'on-demand'` (default): Fetches data only when queries execute. Each query with different
+     *   filters/sorting triggers a new fetch from PocketBase. Enables true server-side
+     *   filtering and is better for large datasets.
+     *
+     * - `'eager'`: Fetches all data immediately when collection is created.
+     *   Queries are evaluated client-side against the cached data. Fast for small datasets
+     *   but loads entire collection into memory.
+     *
+     * @default 'on-demand'
+     *
+     * @example
+     * ```ts
+     * // Default: on-demand mode - server-side filtering
+     * const collection = createCollection<Schema>(pb, queryClient)('books');
+     *
+     * // Eager mode - client-side filtering
+     * const collection = createCollection<Schema>(pb, queryClient)('books', {
+     *     syncMode: 'eager'
+     * });
+     * ```
+     */
+    syncMode?: 'eager' | 'on-demand';
 }

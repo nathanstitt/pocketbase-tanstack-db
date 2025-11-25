@@ -8,7 +8,15 @@
  * @packageDocumentation
  */
 
+// Import query builder extensions for side effects (module augmentation + prototype extension)
+import './query-builder-extensions';
+
 export { createCollection } from './collection';
+
+export {
+    createExpandFactory,
+    type ExpandFactory,
+} from './query-builder-extensions';
 
 export {
     createReactProvider,

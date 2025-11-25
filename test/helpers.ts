@@ -77,8 +77,10 @@ export function getCurrentOrg(): string | undefined {
 /**
  * Create a books collection with the given query client
  */
-export function createBooksCollection(queryClient: QueryClient) {
-    return createCollection<Schema>(pb, queryClient)('books', {})
+export function createBooksCollection(queryClient: QueryClient, options?: { syncMode?: 'eager' | 'on-demand' }) {
+    return createCollection<Schema>(pb, queryClient)('books', {
+        syncMode: options?.syncMode
+    })
 }
 
 /**

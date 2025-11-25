@@ -1,9 +1,9 @@
 import { renderHook, waitFor } from '@testing-library/react';
-import { useLiveQuery } from '@tanstack/react-db';
+import { eq, useLiveQuery } from '@tanstack/react-db';
 import { afterAll, beforeAll, beforeEach, afterEach, describe, expect, it } from 'vitest';
 import type { QueryClient } from '@tanstack/react-query';
 
-import { createCollection, createCollections } from '../src/collection';
+import { createCollection } from '../src/collection';
 import { createReactProvider } from '../src/react';
 import type { Schema } from './schema';
 import { pb, createTestQueryClient, authenticateTestUser, clearAuth, getTestAuthorId } from './helpers';
@@ -51,7 +51,7 @@ describe('Query-Time Expand Feature', () => {
             const booksCollection = createCollection<Schema>(pb, queryClient)('books', {});
 
             expect(() => {
-                booksCollection.expand(['author'] as const);
+                booksCollection.expand('author');
             }).toThrow(/does not have expandable config/);
         });
 
@@ -65,13 +65,13 @@ describe('Query-Time Expand Feature', () => {
 
             expect(() => {
                 // @ts-expect-error - Testing invalid field
-                booksCollection.expand(['invalid_field']);
+                booksCollection.expand('invalid_field');
             }).toThrow(/is not in expandable config/);
         });
     });
 
     describe('Expand with single relation', () => {
-        it.only ('should expand author relation and insert into authors collection', async () => {
+        it('should expand author relation and insert into authors collection', async () => {
             const authorsCollection = createCollection<Schema>(pb, queryClient)('authors', {});
             const booksCollection = createCollection<Schema>(pb, queryClient)('books', {
                 expandable: {
@@ -79,7 +79,7 @@ describe('Query-Time Expand Feature', () => {
                 }
             });
 
-            const booksWithAuthor = booksCollection.expand(['author'] as const);
+            const booksWithAuthor = booksCollection.expand('author');
 
             const { result } = renderHook(
                 () => {
@@ -127,7 +127,7 @@ describe('Query-Time Expand Feature', () => {
                 }
             });
 
-            const booksWithAuthor = booksCollection.expand(['author'] as const);
+            const booksWithAuthor = booksCollection.expand('author');
 
             const { result } = renderHook(
                 () => useLiveQuery((q) => q.from({ books: booksWithAuthor })),
@@ -186,24 +186,29 @@ describe('Query-Time Expand Feature', () => {
 
     describe('React Integration with createReactProvider', () => {
         it('should work with useStore and expand', async () => {
-            const collections = createCollections<Schema>(pb, queryClient)({
-                authors: {},
-                books: {},
+
+            const c = createCollection<Schema>(pb, queryClient);
+            const authors = c('authors', {});
+            const booksCollection = c('books', {
+                expandable: {
+                    author: authors,
+                }
             });
+            const collections = {
+                authors,
+                books: booksCollection,
+            };
+
             const { Provider, useStore } = createReactProvider(collections);
 
+            const authorId = await getTestAuthorId()
             const { result } = renderHook(
                 () => {
-                    const authors = useStore('authors');
-
-                    const booksCollection = createCollection<Schema>(pb, queryClient)('books', {
-                        expandable: {
-                            author: authors
-                        }
-                    });
+                    const [books] = useStore('books');
 
                     return useLiveQuery((q) =>
-                        q.from({ books: booksCollection.expand(['author'] as const) })
+                        q.from({ books: books.expand('author') })
+                            .where(({ books }) => eq(books.author, authorId))
                     );
                 },
                 { wrapper: ({ children }) => <Provider>{children}</Provider> }
@@ -224,10 +229,11 @@ describe('Query-Time Expand Feature', () => {
         }, 15000);
 
         it('should support using expandable with useStore collections', async () => {
-            const collections = createCollections<Schema>(pb, queryClient)({
-                authors: {},
-                books: {},
-            });
+            const c = createCollection<Schema>(pb, queryClient);
+            const collections = {
+                authors: c('authors', {}),
+                books: c('books', {}),
+            };
             const { Provider, useStore } = createReactProvider(collections);
 
             const { result } = renderHook(
@@ -241,7 +247,7 @@ describe('Query-Time Expand Feature', () => {
                     });
 
                     return useLiveQuery((q) =>
-                        q.from({ books: booksWithExpandable.expand(['author'] as const) })
+                        q.from({ books: booksWithExpandable.expand('author') })
                     );
                 },
                 { wrapper: ({ children }) => <Provider>{children}</Provider> }
@@ -272,8 +278,8 @@ describe('Query-Time Expand Feature', () => {
                 }
             });
 
-             const expandedBooks1 = booksCollection.expand(['author'] as const);
-            const expandedBooks2 = booksCollection.expand(['author'] as const);
+             const expandedBooks1 = booksCollection.expand('author');
+            const expandedBooks2 = booksCollection.expand('author');
 
             const { result: result1 } = renderHook(
                 () => useLiveQuery((q) => q.from({ books: expandedBooks1 })),
@@ -300,10 +306,10 @@ describe('Query-Time Expand Feature', () => {
             const booksCollection = createCollection<Schema>(pb, queryClient)('books', {});
 
             expect(() => {
-                booksCollection.expand(['author'] as const);
+                booksCollection.expand('author');
             }).toThrow(/Collection 'books' does not have expandable config/);
             expect(() => {
-                booksCollection.expand(['author'] as const);
+                booksCollection.expand('author');
             }).toThrow(/Add 'expandable' option when creating the collection/);
         });
 
@@ -317,7 +323,7 @@ describe('Query-Time Expand Feature', () => {
 
             expect(() => {
                 // @ts-expect-error - Testing runtime error
-                booksCollection.expand(['invalid']);
+                booksCollection.expand('invalid');
             }).toThrow(/Available fields: author/);
         });
     });

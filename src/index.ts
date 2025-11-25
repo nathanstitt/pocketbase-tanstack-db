@@ -8,7 +8,7 @@
  * @packageDocumentation
  */
 
-export { createCollection, createCollections, type CollectionsConfig, type InferCollectionsMap } from './collection';
+export { createCollection } from './collection';
 
 export {
     createReactProvider,

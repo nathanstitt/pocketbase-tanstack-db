@@ -47,120 +47,182 @@ npm install pocketbase-tanstack-db pocketbase @tanstack/react-query @tanstack/re
 
 ## Quick Start
 
+Let's build a **real-world blog** with posts, authors, and comments using pbtsdb.
+
 ### 1. Define Your Schema
 
-Create type-safe schema definitions for your PocketBase collections. It's recommended that you install https://github.com/satohshi/pocketbase-schema-generator as a pocketbase hook - when configured, a schema file will be auto-generated on every schema change.
+First, generate your types from PocketBase. Install [pocketbase-schema-generator](https://github.com/satohshi/pocketbase-schema-generator) as a PocketBase hook to auto-generate types on schema changes.
 
 ```typescript
-import type { SchemaDeclaration } from 'pocketbase-tanstack-db';
-
-// Define your record types
-interface Author {
-    id: string;
-    name: string;
-    email: string;
-    created: string;
-    updated: string;
-}
-
-interface Book {
+// schema.ts - Auto-generated from PocketBase
+interface Post {
     id: string;
     title: string;
-    author: string; // FK to authors
-    genre: 'Fiction' | 'Non-Fiction' | 'Science Fiction';
-    published_date: string;
+    content: string;
+    author: string;      // FK to users
+    published: boolean;
     created: string;
     updated: string;
 }
 
-// Create schema declaration
-type MySchema = {
-    authors: {
-        type: Author;
+interface User {
+    id: string;
+    username: string;
+    email: string;
+    avatar?: string;
+    created: string;
+    updated: string;
+}
+
+interface Comment {
+    id: string;
+    post: string;        // FK to posts
+    author: string;      // FK to users
+    text: string;
+    created: string;
+    updated: string;
+}
+
+// Schema declaration for pbtsdb
+type BlogSchema = {
+    posts: {
+        type: Post;
+        relations: { author: User };
+    };
+    users: {
+        type: User;
         relations: {};
     };
-    books: {
-        type: Book;
+    comments: {
+        type: Comment;
         relations: {
-            author: Author;
+            post: Post;
+            author: User;
         };
     };
 }
 ```
 
-### 2. Create React Collections
+### 2. Set Up Your App
 
 ```typescript
+// app.tsx
 import PocketBase from 'pocketbase';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { createReactCollections, defineCollection } from 'pocketbase-tanstack-db';
+import { createCollection, createReactProvider } from 'pocketbase-tanstack-db';
 
-// Initialize PocketBase
 const pb = new PocketBase('http://localhost:8090');
-
-// Initialize QueryClient
 const queryClient = new QueryClient({
     defaultOptions: {
-        queries: {
-            staleTime: 1000 * 60, // 1 minute
-        },
-    },
+        queries: { staleTime: 60_000 } // Cache for 1 minute
+    }
 });
 
-// Create typed collections - automatic type inference!
-const { Provider, useStore } = createReactCollections<MySchema>(pb, queryClient)({
-    authors: defineCollection('authors', {}),
-    books: defineCollection('books', {}),
+// Create collections with automatic type inference
+const c = createCollection<BlogSchema>(pb, queryClient);
+export const { Provider, useStore } = createReactProvider({
+    posts: c('posts', {
+        omitOnInsert: ['created', 'updated'] as const
+    }),
+    users: c('users', {}),
+    comments: c('comments', {
+        omitOnInsert: ['created', 'updated'] as const
+    })
 });
 
-// Wrap your app
-function App() {
+export function App() {
     return (
         <QueryClientProvider client={queryClient}>
             <Provider>
-                <BooksList />
+                <BlogDashboard />
             </Provider>
         </QueryClientProvider>
     );
 }
 ```
 
-### 3. Use in React Components
+### 3. Build Your Components
 
 ```typescript
+// BlogDashboard.tsx
 import { useLiveQuery } from '@tanstack/react-db';
-import { CollectionFactory } from 'pocketbase-tanstack-db';
+import { useStore } from './app';
 
-// Initialize factory (once per app)
-const factory = new CollectionFactory<MySchema>(pb, queryClient);
+export function BlogDashboard() {
+    const [posts] = useStore(['posts']);
 
-function BooksList() {
-    const [books, authors] = useStore('books', 'authors');  // ✅ Fully typed!
-
-    // Create expandable relationship
-    const booksWithAuthor = factory.create('books', {
-        expandable: { author: authors }
-    }).expand(['author'] as const);
-
-    const { data, isLoading } = useLiveQuery((q) =>
-        q.from({ books: booksWithAuthor })
+    const { data: allPosts, isLoading } = useLiveQuery((q) =>
+        q.from({ posts })
+            .orderBy(({ posts }) => posts.created, 'desc')
     );
 
-    if (isLoading) return <div>Loading...</div>;
+    if (isLoading) return <div>Loading posts...</div>;
 
     return (
-        <ul>
-            {data?.map(book => (
-                <li key={book.id}>
-                    {book.title}
-                    {/* Expanded relation is fully typed! */}
-                    {book.expand?.author && ` by ${book.expand.author.name}`}
-                </li>
+        <div>
+            <h1>Blog Posts</h1>
+            {allPosts?.map(post => (
+                <article key={post.id}>
+                    <h2>{post.title}</h2>
+                    <p>{post.content}</p>
+                    {/* Expanded author is fully typed! */}
+                    <small>By {post.expand?.author?.username}</small>
+                </article>
             ))}
-        </ul>
+        </div>
     );
 }
 ```
+
+### 4. Add Real-time Comments
+
+```typescript
+// PostWithComments.tsx
+import { useLiveQuery } from '@tanstack/react-db';
+import { eq } from '@tanstack/db';
+import { useStore } from './app';
+import { newRecordId } from 'pocketbase-tanstack-db';
+
+export function PostWithComments({ postId }: { postId: string }) {
+    const [comments, posts] = useStore(['comments', 'posts'] as const);
+
+    // Real-time comments for this post
+    const { data: postComments } = useLiveQuery((q) =>
+        q.from({ comments })
+            .where(({ comments }) => eq(comments.post, postId))
+            .orderBy(({ comments }) => comments.created, 'desc')
+    );
+
+    const handleAddComment = (text: string, authorId: string) => {
+        comments.insert({
+            id: newRecordId(),
+            post: postId,
+            author: authorId,
+            text
+        });
+        // Comment appears instantly (optimistic), syncs to PocketBase in background
+    };
+
+    return (
+        <div>
+            <h3>Comments ({postComments?.length || 0})</h3>
+            {postComments?.map(comment => (
+                <div key={comment.id}>
+                    <strong>{comment.expand?.author?.username}:</strong>
+                    <p>{comment.text}</p>
+                </div>
+            ))}
+            <CommentForm onSubmit={handleAddComment} />
+        </div>
+    );
+}
+```
+
+**That's it!** You now have a real-time blog with:
+- ✅ Type-safe queries
+- ✅ Automatic real-time updates
+- ✅ Optimistic mutations
+- ✅ Expanded relations
 
 ## Core Concepts
 
@@ -291,35 +353,60 @@ const { data } = useLiveQuery((q) => q.from({ books: booksWithAuthor }));
 
 ### React Integration
 
-#### createReactCollections()
+#### createCollection()
 
-Creates a fully typed React integration for PocketBase collections with automatic type inference.
+Creates a single type-safe collection backed by PocketBase. Use the curried API to create multiple collections.
 
 ```typescript
-const { Provider, useStore } = createReactCollections<Schema>(
-    pb: PocketBase,
-    queryClient: QueryClient,
-    config: CollectionsConfig
-)
+const createCol = createCollection<Schema>(pb: PocketBase, queryClient: QueryClient);
+const collection = createCol(collectionName: string, options?: CreateCollectionOptions);
 ```
 
 **Parameters:**
 - `pb` - PocketBase instance
 - `queryClient` - TanStack Query QueryClient instance
-- `config` - Object mapping keys to collection configurations
+- `collectionName` - Name of the PocketBase collection
+- `options` - Optional configuration (omitOnInsert, expandable, relations, etc.)
 
-**Returns:**
-- `Provider` - React Context Provider component
-- `useStore` - Hook to access collections (supports single and variadic access)
+**Returns:** Fully-typed Collection instance with subscription capabilities
 
 **Example:**
 ```typescript
-import { createReactCollections, defineCollection } from 'pocketbase-tanstack-db';
+import { createCollection } from 'pocketbase-tanstack-db';
 
-const { Provider, useStore } = createReactCollections<MySchema>(pb, queryClient)({
-    authors: defineCollection('authors', {}),
-    books: defineCollection('books', {}),
+const c = createCollection<MySchema>(pb, queryClient);
+const authors = c('authors', {});
+const books = c('books', {
+    omitOnInsert: ['created', 'updated'] as const
 });
+```
+
+#### createReactProvider()
+
+Creates a React Provider and useStore hook for accessing collections.
+
+```typescript
+const { Provider, useStore } = createReactProvider(collections: CollectionsMap);
+```
+
+**Parameters:**
+- `collections` - Object mapping keys to Collection instances
+
+**Returns:**
+- `Provider` - React Context Provider component
+- `useStore` - Hook to access collections (takes an array, returns typed tuple)
+
+**Example:**
+```typescript
+import { createCollection, createReactProvider } from 'pocketbase-tanstack-db';
+
+const c = createCollection<MySchema>(pb, queryClient);
+const collections = {
+    authors: c('authors', {}),
+    books: c('books', {}),
+};
+
+const { Provider, useStore } = createReactProvider(collections);
 
 // Wrap your app
 <Provider>
@@ -329,33 +416,34 @@ const { Provider, useStore } = createReactCollections<MySchema>(pb, queryClient)
 
 **With custom collection key:**
 ```typescript
-const { Provider, useStore } = createReactCollections<MySchema>(pb, queryClient)({
-    myBooks: defineCollection('books', {  // Key 'myBooks', collection 'books'
-    })
-});
+const collections = {
+    myBooks: c('books', {})  // Key 'myBooks', collection 'books'
+};
+
+const { Provider, useStore } = createReactProvider(collections);
 
 // Access via custom key
-const myBooks = useStore('myBooks');
+const [myBooks] = useStore(['myBooks']);
 ```
 
 #### useStore()
 
-Access collections from the provider. Automatically typed based on your config.
+Access collections from the provider. Always takes an array and returns a typed tuple.
 
 **Single collection:**
 ```typescript
-const collection = useStore('key')
+const [collection] = useStore(['key'])
 ```
 
-**Multiple collections (variadic):**
+**Multiple collections (use `as const` for proper type inference):**
 ```typescript
-const [col1, col2, col3] = useStore('key1', 'key2', 'key3')
+const [col1, col2, col3] = useStore(['key1', 'key2', 'key3'] as const)
 ```
 
 **Examples:**
 ```typescript
 function BooksList() {
-    const books = useStore('books');  // ✅ Typed automatically!
+    const [books] = useStore(['books']);  // ✅ Typed automatically!
 
     const { data } = useLiveQuery((q) =>
         q.from({ books })
@@ -365,7 +453,7 @@ function BooksList() {
 }
 
 function BooksWithAuthors() {
-    const [books, authors] = useStore('books', 'authors');  // ✅ Variadic!
+    const [books, authors] = useStore(['books', 'authors'] as const);  // ✅ Array-based!
 
     const { data } = useLiveQuery((q) =>
         q.from({ book: books })
@@ -463,606 +551,213 @@ booksCollection.insert(newBook);
 
 ## Usage Examples
 
-### Basic Queries
+### Example 1: Building a Task Manager
 
-#### Fetch All Records
-
-```typescript
-const { data: books, isLoading, error } = useLiveQuery((q) =>
-    q.from({ books: booksCollection })
-);
-
-if (isLoading) return <div>Loading...</div>;
-if (error) return <div>Error: {error.message}</div>;
-
-return (
-    <ul>
-        {books?.map(book => (
-            <li key={book.id}>{book.title}</li>
-        ))}
-    </ul>
-);
-```
-
-#### Fetch Single Record
+Complete example showing filtering, updates, and real-time collaboration.
 
 ```typescript
-import { eq } from '@tanstack/db';
-
-const bookId = 'abc123';
-
-const { data: books } = useLiveQuery((q) =>
-    q.from({ books: booksCollection })
-        .where(({ books }) => eq(books.id, bookId))
-);
-
-const book = books?.[0];
-```
-
-### Filtering and Sorting
-
-#### Basic Filtering
-
-```typescript
-import { eq, gt, and, or } from '@tanstack/db';
-
-// Filter by genre
-const { data } = useLiveQuery((q) =>
-    q.from({ books: booksCollection })
-        .where(({ books }) => eq(books.genre, 'Fiction'))
-);
-
-// Filter by date
-const { data } = useLiveQuery((q) =>
-    q.from({ books: booksCollection })
-        .where(({ books }) =>
-            gt(books.published_date, '2020-01-01')
-        )
-);
-
-// Multiple conditions with AND
-const { data } = useLiveQuery((q) =>
-    q.from({ books: booksCollection })
-        .where(({ books }) => and(
-            eq(books.genre, 'Fiction'),
-            gt(books.published_date, '2020-01-01')
-        ))
-);
-
-// Multiple conditions with OR
-const { data } = useLiveQuery((q) =>
-    q.from({ books: booksCollection })
-        .where(({ books }) => or(
-            eq(books.genre, 'Fiction'),
-            eq(books.genre, 'Science Fiction')
-        ))
-);
-```
-
-#### Advanced Filtering
-
-```typescript
-import { gte, lte, and } from '@tanstack/db';
-
-// Complex nested queries
-const { data } = useLiveQuery((q) =>
-    q.from({ books: booksCollection })
-        .where(({ books }) => and(
-            eq(books.genre, 'Fiction'),
-            or(
-                gte(books.published_date, '2020-01-01'),
-                lte(books.published_date, '2010-12-31')
-            )
-        ))
-);
-```
-
-#### Sorting
-
-```typescript
-// Sort descending
-const { data } = useLiveQuery((q) =>
-    q.from({ books: booksCollection })
-        .orderBy(({ books }) => books.published_date, 'desc')
-);
-
-// Sort ascending
-const { data } = useLiveQuery((q) =>
-    q.from({ books: booksCollection })
-        .orderBy(({ books }) => books.title, 'asc')
-);
-
-// Multiple sorts
-const { data } = useLiveQuery((q) =>
-    q.from({ books: booksCollection })
-        .orderBy(({ books }) => books.genre, 'asc')
-        .orderBy(({ books }) => books.published_date, 'desc')
-);
-```
-
-### Relations and Joins
-
-#### Query-Time Expand
-
-Choose which relations to expand per-query with automatic insertion into target collections:
-
-```typescript
-// Define which relations CAN be expanded
-const authorsCollection = factory.create('authors');
-const metadataCollection = factory.create('book_metadata');
-
-const booksCollection = factory.create('books', {
-    expandable: {
-        author: authorsCollection,
-        metadata: metadataCollection
-    }
-});
-
-// Query 1: Expand only author
-const { data: booksWithAuthor } = useLiveQuery((q) =>
-    q.from({ books: booksCollection.expand(['author'] as const) })
-);
-
-// Query 2: Expand both author and metadata
-const { data: booksWithAll } = useLiveQuery((q) =>
-    q.from({ books: booksCollection.expand(['author', 'metadata'] as const) })
-);
-
-// Query 3: No expand (base collection)
-const { data: booksOnly } = useLiveQuery((q) =>
-    q.from({ books: booksCollection })
-);
-```
-
-**Benefits:**
-- ✅ Choose expand fields per-query instead of per-collection
-- ✅ Expanded records automatically inserted into their target collections
-- ✅ Full type safety - TypeScript knows which fields are expanded
-- ✅ Efficient caching - different expand combinations cached separately
-
-**Example with auto-insertion:**
-
-```typescript
-const authorsCollection = factory.create('authors');
-const booksCollection = factory.create('books', {
-    expandable: {
-        author: authorsCollection
-    }
-});
-
-// Fetch books with author expanded
-const { data: books } = useLiveQuery((q) =>
-    q.from({ books: booksCollection.expand(['author'] as const) })
-);
-
-// Fetch all authors separately
-const { data: authors } = useLiveQuery((q) =>
-    q.from({ authors: authorsCollection })
-);
-
-// The expanded author from books is automatically available in authorsCollection!
-// Both queries share the same author data
-books[0].expand?.author?.name === authors.find(a => a.id === books[0].author)?.name // ✅ true
-```
-
-**When to use:**
-- Different queries need different expand combinations
-- You want expanded records to populate their own collections automatically
-- Building dashboards with varying detail levels
-
-#### TanStack DB Joins
-
-For complex client-side joins:
-
-```typescript
-const authorsCollection = factory.create('authors');
-const booksCollection = factory.create('books', {
-    relations: {
-        author: authorsCollection
-    }
-});
-
-// Manual join with full type safety
-const { data } = useLiveQuery((q) =>
-    q.from({ book: booksCollection })
-        .join(
-            { author: authorsCollection },
-            ({ book, author }) => eq(book.author, author.id),
-            'left' // Join type: 'left' | 'right' | 'inner' | 'full'
-        )
-        .select(({ book, author }) => ({
-            ...book,
-            expand: {
-                author: author ? { ...author } : undefined
-            }
-        }))
-);
-```
-
-#### Inner Join (Filter Out Missing Relations)
-
-```typescript
-const { data } = useLiveQuery((q) =>
-    q.from({ book: booksCollection })
-        .join(
-            { author: authorsCollection },
-            ({ book, author }) => eq(book.author, author.id),
-            'inner' // Only books WITH authors
-        )
-);
-```
-
-#### Complex Multi-Collection Joins
-
-```typescript
-const authorsCollection = factory.create('authors');
-const booksCollection = factory.create('books');
-const metadataCollection = factory.create('book_metadata');
-
-const { data } = useLiveQuery((q) =>
-    q.from({ book: booksCollection })
-        .join(
-            { author: authorsCollection },
-            ({ book, author }) => eq(book.author, author.id),
-            'left'
-        )
-        .join(
-            { metadata: metadataCollection },
-            ({ book, metadata }) => eq(book.id, metadata.book),
-            'left'
-        )
-        .select(({ book, author, metadata }) => ({
-            ...book,
-            expand: {
-                author: author ? { ...author } : undefined,
-                metadata: metadata ? { ...metadata } : undefined
-            }
-        }))
-);
-```
-
-### Real-time Updates
-
-#### Automatic Updates
-
-Collections automatically receive real-time updates based on query lifecycle:
-
-```typescript
-function BooksList() {
-    const { data } = useLiveQuery((q) =>
-        q.from({ books: booksCollection })
-    );
-
-    // Subscription automatically starts when component mounts
-    // Component re-renders automatically when:
-    // - A book is created
-    // - A book is updated
-    // - A book is deleted
-    // Subscription automatically stops when component unmounts (with 5s delay)
-
-    return <ul>{/* ... */}</ul>;
-}
-```
-
-**Subscription Lifecycle:**
-- ✅ Collections are lazy - no network activity on creation
-- ✅ Subscription starts when first `useLiveQuery` becomes active
-- ✅ Multiple queries share a single subscription per collection
-- ✅ Subscription stops 5 seconds after last query unmounts
-- ✅ Prevents thrashing during rapid mount/unmount cycles
-
-#### Manual Subscription Control (Advanced)
-
-For advanced use cases, you can manually control subscriptions:
-
-```typescript
-const booksCollection = factory.create('books');
-
-// Manually subscribe (bypasses automatic lifecycle)
-await booksCollection.subscribe();
-
-// Subscribe to specific record
-await booksCollection.subscribe('record_id');
-
-// Unsubscribe when done
-booksCollection.unsubscribe('record_id');
-booksCollection.unsubscribeAll();
-```
-
-#### Subscribing to Specific Records
-
-```typescript
-// Subscribe to a specific book
-await booksCollection.subscribe('book_id_123');
-
-// Check if subscribed
-if (booksCollection.isSubscribed('book_id_123')) {
-    console.log('Subscribed to book_id_123');
-}
-
-// Unsubscribe from specific record
-booksCollection.unsubscribe('book_id_123');
-```
-
-#### Waiting for Subscription (Testing)
-
-```typescript
-// Useful in tests
-await booksCollection.waitForSubscription();
-
-// Now safe to create/update records and expect real-time updates
-const newBook = await pb.collection('books').create({ /* ... */ });
-
-// Wait for update to propagate
-await waitFor(() => {
-    expect(data?.some(b => b.id === newBook.id)).toBe(true);
-});
-```
-
-### Mutations
-
-Collections support insert, update, and delete operations with automatic PocketBase synchronization and optimistic updates.
-
-#### Insert Records
-
-```typescript
-import { newRecordId } from 'pocketbase-tanstack-db';
-
-const { data } = useLiveQuery((q) =>
-    q.from({ books: booksCollection })
-);
-
-// Insert a new book
-const newBook: Book = {
-    id: newRecordId(), // Generate PocketBase-compatible ID
-    title: 'The Great Gatsby',
-    author: 'author_id_123',
-    genre: 'Fiction',
-    published_date: '1925-04-10',
-    created: new Date().toISOString(),
-    updated: new Date().toISOString(),
-};
-
-const transaction = booksCollection.insert(newBook);
-
-// Transaction states: 'pending' → 'persisting' → 'completed'
-console.log(transaction.state); // 'pending' or 'persisting'
-
-// Wait for persistence
-await transaction.isPersisted.promise;
-console.log(transaction.state); // 'completed'
-
-// Optimistic update: newBook appears in UI immediately
-// Real sync: newBook saved to PocketBase
-```
-
-#### Update Records
-
-```typescript
-// Update a book's title
-const transaction = booksCollection.update('book_id_123', (draft) => {
-    draft.title = 'Updated Title';
-    draft.genre = 'Science Fiction';
-});
-
-// Optimistic update: Changes appear immediately in UI
-// Real sync: Changes saved to PocketBase
-
-await transaction.isPersisted.promise;
-```
-
-#### Non-Optimistic Updates
-
-By default, mutations are optimistic (UI updates immediately). Disable for server-first updates:
-
-```typescript
-// Update config goes BEFORE the callback
-const transaction = booksCollection.update(
-    'book_id_123',
-    { optimistic: false }, // ← Config parameter
-    (draft) => {
-        draft.title = 'Server-First Update';
-    }
-);
-
-// UI won't update until server confirms
-await transaction.isPersisted.promise;
-// Now UI updates with server response
-```
-
-#### Delete Records
-
-```typescript
-const transaction = booksCollection.delete('book_id_123');
-
-// Optimistic update: Record removed from UI immediately
-// Real sync: Record deleted from PocketBase
-
-await transaction.isPersisted.promise;
-```
-
-#### Batch Mutations
-
-Batch multiple mutations together for better performance:
-
-```typescript
-booksCollection.utils.writeBatch(() => {
-    // Multiple mutations in one batch
-    booksCollection.update('book_1', (draft) => {
-        draft.title = 'Updated Title 1';
-    });
-
-    booksCollection.update('book_2', (draft) => {
-        draft.title = 'Updated Title 2';
-    });
-
-    booksCollection.update('book_3', (draft) => {
-        draft.genre = 'Mystery';
-    });
-});
-
-// All mutations:
-// - Execute optimistically together
-// - Merge updates to the same record
-// - Sync to PocketBase in a single transaction
-```
-
-#### Mutation Merging
-
-Multiple updates to the same record within a batch are automatically merged:
-
-```typescript
-booksCollection.utils.writeBatch(() => {
-    booksCollection.update('book_1', (draft) => {
-        draft.title = 'First Update';
-    });
-
-    booksCollection.update('book_1', (draft) => {
-        draft.title = 'Final Title'; // Overwrites previous
-    });
-
-    booksCollection.update('book_1', (draft) => {
-        draft.genre = 'Mystery'; // Merged with title update
-    });
-});
-
-// Result: Only ONE mutation sent to PocketBase with:
-// { title: 'Final Title', genre: 'Mystery' }
-```
-
-#### Transaction States
-
-Mutations return a `Transaction` object with state tracking:
-
-```typescript
-const tx = booksCollection.insert(newBook);
-
-// States: 'pending' | 'persisting' | 'completed' | 'error'
-console.log(tx.state);
-
-// Wait for completion
-await tx.isPersisted.promise;
-
-if (tx.state === 'completed') {
-    console.log('Mutation succeeded!');
-}
-```
-
-#### Custom Mutation Handlers
-
-Override default behavior for insert/update/delete operations:
-
-```typescript
-const booksCollection = factory.create('books', {
-    // Custom insert handler
-    onInsert: async ({ transaction }) => {
-        for (const mutation of transaction.mutations) {
-            await customInsertLogic(mutation.modified);
-        }
-        await queryClient.invalidateQueries({ queryKey: ['books'] });
-    },
-
-    // Custom update handler
-    onUpdate: async ({ transaction }) => {
-        for (const mutation of transaction.mutations) {
-            const recordId = (mutation.original as { id: string }).id;
-            await customUpdateLogic(recordId, mutation.changes);
-        }
-        await queryClient.invalidateQueries({ queryKey: ['books'] });
-    },
-
-    // Custom delete handler
-    onDelete: async ({ transaction }) => {
-        for (const mutation of transaction.mutations) {
-            const recordId = (mutation.original as { id: string }).id;
-            await customDeleteLogic(recordId);
-        }
-        await queryClient.invalidateQueries({ queryKey: ['books'] });
-    },
-});
-```
-
-#### Disable Mutations (Read-Only Collections)
-
-Set mutation handlers to `false` to disable specific operations:
-
-```typescript
-const booksCollection = factory.create('books', {
-    onInsert: false, // Inserts will throw an error
-    onUpdate: false, // Updates will throw an error
-    onDelete: false, // Deletes will throw an error
-});
-
-// This will throw an error:
-booksCollection.insert(newBook); // ❌ Error: Inserts disabled
-```
-
-#### Mutations with Expand
-
-Mutations work seamlessly with expanded relations:
-
-```typescript
-const authorsCollection = factory.create('authors');
-const booksCollection = factory.create('books', {
-    expandable: {
-        author: authorsCollection
-    }
-});
-
-const booksWithAuthor = booksCollection.expand(['author'] as const);
-
-// Insert a new book
-const newBook = {
-    id: newRecordId(),
-    title: 'New Book',
-    author: 'author_id_123',
-    // ... other fields
-};
-
-booksWithAuthor.insert(newBook);
-
-// After sync, the expanded collection will re-fetch with expand
-// so the new book will have book.expand.author populated
-```
-
-## TypeScript
-
-### Schema Declaration
-
-Define your schema with full type safety:
-
-```typescript
-import type { SchemaDeclaration } from 'pocketbase-tanstack-db';
-
-interface MySchema extends SchemaDeclaration {
-    collection_name: {
-        Row: RecordType;      // Your record type
-        Relations: {
-            forward: {
-                // Forward relations (FK fields)
-                field_name: [
-                    'target_collection',
-                    is_array // false for single, true for array
-                ];
-            };
-            back: {
-                // Back relations (reverse lookups)
-                relation_name: ['source_collection', is_array];
-            };
-        };
-    };
-}
-```
-
-### Example: Blog Schema
-
-```typescript
-interface Post {
+// schema.ts
+interface Task {
     id: string;
     title: string;
+    status: 'todo' | 'in_progress' | 'done';
+    assignee: string;  // FK to users
+    due_date?: string;
+    created: string;
+    updated: string;
+}
+
+interface User {
+    id: string;
+    name: string;
+    email: string;
+    created: string;
+    updated: string;
+}
+
+type TaskSchema = {
+    tasks: {
+        type: Task;
+        relations: { assignee: User };
+    };
+    users: {
+        type: User;
+        relations: {};
+    };
+}
+
+// TaskBoard.tsx
+import { useLiveQuery } from '@tanstack/react-db';
+import { eq, and, gt } from '@tanstack/db';
+import { useStore } from './app';
+
+export function TaskBoard({ userId }: { userId: string }) {
+    const tasks = useStore('tasks');
+
+    // Filter tasks by status and assignee - updates in real-time
+    const { data: myTasks } = useLiveQuery((q) =>
+        q.from({ tasks })
+            .where(({ tasks }) => and(
+                eq(tasks.assignee, userId),
+                eq(tasks.status, 'in_progress')
+            ))
+            .orderBy(({ tasks }) => tasks.due_date, 'asc')
+    );
+
+    // Find overdue tasks
+    const today = new Date().toISOString().split('T')[0];
+    const { data: overdueTasks } = useLiveQuery((q) =>
+        q.from({ tasks })
+            .where(({ tasks }) => and(
+                eq(tasks.assignee, userId),
+                tasks.due_date < today,
+                tasks.status !== 'done'
+            ))
+    );
+
+    const handleCompleteTask = (taskId: string) => {
+        // Optimistic update - UI updates instantly
+        tasks.update(taskId, (draft) => {
+            draft.status = 'done';
+        });
+    };
+
+    return (
+        <div>
+            {overdueTasks && overdueTasks.length > 0 && (
+                <div className="alert">
+                    ⚠️ You have {overdueTasks.length} overdue tasks!
+                </div>
+            )}
+
+            <h2>My Tasks ({myTasks?.length || 0})</h2>
+            {myTasks?.map(task => (
+                <TaskCard
+                    key={task.id}
+                    task={task}
+                    onComplete={() => handleCompleteTask(task.id)}
+                />
+            ))}
+        </div>
+    );
+}
+```
+
+### Example 2: E-commerce Product Catalog with Search
+
+Real-world product browsing with filtering, search, and categories.
+
+```typescript
+// ProductCatalog.tsx
+import { useLiveQuery } from '@tanstack/react-db';
+import { and, or, gte, lte } from '@tanstack/db';
+import { useStore } from './app';
+import { useState } from 'react';
+
+interface Product {
+    id: string;
+    name: string;
+    price: number;
+    category: 'electronics' | 'clothing' | 'books';
+    in_stock: boolean;
+    rating: number;
+    created: string;
+    updated: string;
+}
+
+export function ProductCatalog() {
+    const products = useStore('products');
+    const [category, setCategory] = useState<string | null>(null);
+    const [priceRange, setPriceRange] = useState({ min: 0, max: 1000 });
+    const [sortBy, setSortBy] = useState<'price' | 'rating'>('rating');
+
+    // Dynamic filtering based on user selections
+    const { data: filteredProducts, isLoading } = useLiveQuery((q) => {
+        let query = q.from({ products });
+
+        // Apply filters
+        const conditions = [];
+
+        if (category) {
+            conditions.push(products.category === category);
+        }
+
+        conditions.push(
+            and(
+                gte(products.price, priceRange.min),
+                lte(products.price, priceRange.max)
+            )
+        );
+
+        // Only show in-stock items
+        conditions.push(products.in_stock === true);
+
+        if (conditions.length > 0) {
+            query = query.where(({ products }) => and(...conditions));
+        }
+
+        // Apply sorting
+        return query.orderBy(
+            ({ products }) => sortBy === 'price' ? products.price : products.rating,
+            sortBy === 'price' ? 'asc' : 'desc'
+        );
+    });
+
+    return (
+        <div>
+            <div className="filters">
+                <select onChange={(e) => setCategory(e.target.value || null)}>
+                    <option value="">All Categories</option>
+                    <option value="electronics">Electronics</option>
+                    <option value="clothing">Clothing</option>
+                    <option value="books">Books</option>
+                </select>
+
+                <input
+                    type="range"
+                    min="0"
+                    max="1000"
+                    value={priceRange.max}
+                    onChange={(e) => setPriceRange({ ...priceRange, max: +e.target.value })}
+                />
+                <span>Max: ${priceRange.max}</span>
+
+                <button onClick={() => setSortBy('price')}>Sort by Price</button>
+                <button onClick={() => setSortBy('rating')}>Sort by Rating</button>
+            </div>
+
+            {isLoading && <div>Loading products...</div>}
+
+            <div className="products">
+                {filteredProducts?.length === 0 ? (
+                    <p>No products found matching your criteria</p>
+                ) : (
+                    filteredProducts?.map(product => (
+                        <ProductCard key={product.id} product={product} />
+                    ))
+                )}
+            </div>
+        </div>
+    );
+}
+```
+
+### Example 3: Social Media Feed with Nested Relations
+
+Building a Twitter-like feed with posts, authors, and likes.
+
+```typescript
+// SocialFeed.tsx
+import { useLiveQuery } from '@tanstack/react-db';
+import { eq } from '@tanstack/db';
+import { useStore } from './app';
+import { newRecordId } from 'pocketbase-tanstack-db';
+
+interface Post {
+    id: string;
     content: string;
-    author: string; // FK to users
-    tags: string[]; // FK array to tags
+    author: string;     // FK to users
+    likes_count: number;
     created: string;
     updated: string;
 }
@@ -1070,182 +765,684 @@ interface Post {
 interface User {
     id: string;
     username: string;
-    email: string;
+    avatar?: string;
     created: string;
     updated: string;
 }
 
-interface Tag {
+interface Like {
+    id: string;
+    post: string;       // FK to posts
+    user: string;       // FK to users
+    created: string;
+    updated: string;
+}
+
+export function SocialFeed({ currentUserId }: { currentUserId: string }) {
+    const [posts, users, likes] = useStore('posts', 'users', 'likes');
+
+    // Fetch posts with expanded author info (fast, single query)
+    const { data: feedPosts } = useLiveQuery((q) =>
+        q.from({ posts })
+            .orderBy(({ posts }) => posts.created, 'desc')
+    );
+
+    // Check which posts the current user has liked
+    const { data: userLikes } = useLiveQuery((q) =>
+        q.from({ likes })
+            .where(({ likes }) => eq(likes.user, currentUserId))
+    );
+
+    const likedPostIds = new Set(userLikes?.map(like => like.post) || []);
+
+    const handleLike = async (postId: string) => {
+        if (likedPostIds.has(postId)) {
+            // Unlike: Find and delete the like
+            const like = userLikes?.find(l => l.post === postId);
+            if (like) {
+                likes.delete(like.id);
+
+                // Decrement like count
+                posts.update(postId, (draft) => {
+                    draft.likes_count -= 1;
+                });
+            }
+        } else {
+            // Like: Create new like
+            likes.insert({
+                id: newRecordId(),
+                post: postId,
+                user: currentUserId
+            });
+
+            // Increment like count
+            posts.update(postId, (draft) => {
+                draft.likes_count += 1;
+            });
+        }
+    };
+
+    return (
+        <div className="feed">
+            {feedPosts?.map(post => (
+                <div key={post.id} className="post">
+                    <div className="author">
+                        <img src={post.expand?.author?.avatar} alt="" />
+                        <strong>{post.expand?.author?.username}</strong>
+                    </div>
+                    <p>{post.content}</p>
+                    <div className="actions">
+                        <button
+                            onClick={() => handleLike(post.id)}
+                            className={likedPostIds.has(post.id) ? 'liked' : ''}
+                        >
+                            ❤️ {post.likes_count} likes
+                        </button>
+                    </div>
+                </div>
+            ))}
+        </div>
+    );
+}
+```
+
+**Key Features:**
+- ✅ Real-time updates when anyone likes/unlikes posts
+- ✅ Optimistic UI - likes appear instantly
+- ✅ Expanded author info with type safety
+- ✅ Efficient queries using expand instead of joins
+
+### Example 4: Real-time Collaborative Todo List
+
+Multiple users editing the same list simultaneously with instant updates.
+
+```typescript
+// CollaborativeTodoList.tsx
+import { useLiveQuery } from '@tanstack/react-db';
+import { eq, and } from '@tanstack/db';
+import { useStore } from './app';
+import { newRecordId } from 'pocketbase-tanstack-db';
+import { useState } from 'react';
+
+interface Todo {
+    id: string;
+    text: string;
+    completed: boolean;
+    list_id: string;
+    created_by: string;  // FK to users
+    created: string;
+    updated: string;
+}
+
+export function CollaborativeTodoList({ listId, currentUserId }: {
+    listId: string;
+    currentUserId: string;
+}) {
+    const todos = useStore('todos');
+    const [newTodoText, setNewTodoText] = useState('');
+
+    // Real-time todos - updates automatically when any user adds/edits
+    const { data: allTodos } = useLiveQuery((q) =>
+        q.from({ todos })
+            .where(({ todos }) => eq(todos.list_id, listId))
+            .orderBy(({ todos }) => todos.created, 'asc')
+    );
+
+    const handleAddTodo = () => {
+        if (!newTodoText.trim()) return;
+
+        // Optimistic insert - appears instantly for all users
+        todos.insert({
+            id: newRecordId(),
+            text: newTodoText,
+            completed: false,
+            list_id: listId,
+            created_by: currentUserId
+        });
+
+        setNewTodoText('');
+    };
+
+    const handleToggle = (todoId: string) => {
+        // Optimistic update - checkbox toggles instantly
+        todos.update(todoId, (draft) => {
+            draft.completed = !draft.completed;
+        });
+    };
+
+    const handleDelete = (todoId: string) => {
+        // Optimistic delete - item disappears instantly
+        todos.delete(todoId);
+    };
+
+    const handleBatchComplete = () => {
+        // Batch multiple updates together for efficiency
+        todos.utils.writeBatch(() => {
+            allTodos?.forEach(todo => {
+                if (!todo.completed) {
+                    todos.update(todo.id, (draft) => {
+                        draft.completed = true;
+                    });
+                }
+            });
+        });
+    };
+
+    const completedCount = allTodos?.filter(t => t.completed).length || 0;
+    const totalCount = allTodos?.length || 0;
+
+    return (
+        <div>
+            <h2>Todos ({completedCount}/{totalCount} completed)</h2>
+
+            <div className="add-todo">
+                <input
+                    value={newTodoText}
+                    onChange={(e) => setNewTodoText(e.target.value)}
+                    onKeyPress={(e) => e.key === 'Enter' && handleAddTodo()}
+                    placeholder="Add a new todo..."
+                />
+                <button onClick={handleAddTodo}>Add</button>
+            </div>
+
+            <div className="actions">
+                <button onClick={handleBatchComplete}>
+                    Complete All
+                </button>
+            </div>
+
+            <ul>
+                {allTodos?.map(todo => (
+                    <li key={todo.id} className={todo.completed ? 'completed' : ''}>
+                        <input
+                            type="checkbox"
+                            checked={todo.completed}
+                            onChange={() => handleToggle(todo.id)}
+                        />
+                        <span>{todo.text}</span>
+                        <button onClick={() => handleDelete(todo.id)}>
+                            Delete
+                        </button>
+                        <small>by {todo.expand?.created_by?.username}</small>
+                    </li>
+                ))}
+            </ul>
+        </div>
+    );
+}
+```
+
+**What Happens in Real-time:**
+1. **User A adds a todo** → User B sees it appear instantly
+2. **User B checks it off** → User A sees the checkbox toggle
+3. **User A deletes it** → User B sees it disappear
+4. **Either user clicks "Complete All"** → Both see all items check off at once
+
+**No manual subscription code needed!** Just use `useLiveQuery` and pbtsdb handles the rest.
+
+### Example 5: Form Handling with Validation and Error Handling
+
+Real-world form submission with optimistic updates and server validation.
+
+```typescript
+// CreateBookForm.tsx
+import { useStore } from './app';
+import { newRecordId } from 'pocketbase-tanstack-db';
+import { useState } from 'react';
+import { useLiveQuery } from '@tanstack/react-db';
+
+interface Book {
+    id: string;
+    title: string;
+    author: string;
+    isbn: string;
+    genre: string;
+    published_date: string;
+    created: string;
+    updated: string;
+}
+
+export function CreateBookForm() {
+    const books = useStore('books');
+    const [formData, setFormData] = useState({
+        title: '',
+        author: '',
+        isbn: '',
+        genre: 'Fiction',
+        published_date: ''
+    });
+    const [isSubmitting, setIsSubmitting] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+
+    // Show all books in real-time
+    const { data: allBooks } = useLiveQuery((q) =>
+        q.from({ books })
+            .orderBy(({ books }) => books.created, 'desc')
+    );
+
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setError(null);
+        setIsSubmitting(true);
+
+        try {
+            // Insert with optimistic update - book appears in list instantly!
+            const transaction = books.insert({
+                id: newRecordId(),
+                ...formData
+            });
+
+            // Wait for server confirmation
+            await transaction.isPersisted.promise;
+
+            if (transaction.state === 'completed') {
+                // Success! Reset form
+                setFormData({
+                    title: '',
+                    author: '',
+                    isbn: '',
+                    genre: 'Fiction',
+                    published_date: ''
+                });
+            } else if (transaction.state === 'error') {
+                // Server validation failed - rollback happened automatically
+                setError('Failed to create book. Please check your input.');
+            }
+        } catch (err: any) {
+            // Handle PocketBase validation errors
+            if (err.data) {
+                const fieldErrors = Object.entries(err.data)
+                    .map(([field, error]) => `${field}: ${error}`)
+                    .join(', ');
+                setError(`Validation errors: ${fieldErrors}`);
+            } else {
+                setError(err.message || 'Unknown error occurred');
+            }
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+
+    const handleDelete = async (bookId: string) => {
+        if (!confirm('Delete this book?')) return;
+
+        // Optimistic delete - disappears from list instantly
+        const transaction = books.delete(bookId);
+
+        // Wait for confirmation (optional)
+        await transaction.isPersisted.promise;
+
+        if (transaction.state === 'error') {
+            alert('Failed to delete book');
+        }
+    };
+
+    return (
+        <div>
+            <h2>Add New Book</h2>
+
+            {error && (
+                <div className="error-message">
+                    ❌ {error}
+                </div>
+            )}
+
+            <form onSubmit={handleSubmit}>
+                <input
+                    required
+                    placeholder="Title"
+                    value={formData.title}
+                    onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+                />
+
+                <input
+                    required
+                    placeholder="Author ID"
+                    value={formData.author}
+                    onChange={(e) => setFormData({ ...formData, author: e.target.value })}
+                />
+
+                <input
+                    required
+                    placeholder="ISBN"
+                    value={formData.isbn}
+                    onChange={(e) => setFormData({ ...formData, isbn: e.target.value })}
+                />
+
+                <select
+                    value={formData.genre}
+                    onChange={(e) => setFormData({ ...formData, genre: e.target.value })}
+                >
+                    <option value="Fiction">Fiction</option>
+                    <option value="Non-Fiction">Non-Fiction</option>
+                    <option value="Science Fiction">Science Fiction</option>
+                </select>
+
+                <input
+                    required
+                    type="date"
+                    value={formData.published_date}
+                    onChange={(e) => setFormData({ ...formData, published_date: e.target.value })}
+                />
+
+                <button type="submit" disabled={isSubmitting}>
+                    {isSubmitting ? 'Saving...' : 'Add Book'}
+                </button>
+            </form>
+
+            <h2>All Books ({allBooks?.length || 0})</h2>
+            <ul>
+                {allBooks?.map(book => (
+                    <li key={book.id}>
+                        <strong>{book.title}</strong> by {book.expand?.author?.name}
+                        <button onClick={() => handleDelete(book.id)}>Delete</button>
+                    </li>
+                ))}
+            </ul>
+        </div>
+    );
+}
+```
+
+**Key Features:**
+- ✅ Optimistic updates - new books appear instantly
+- ✅ Automatic rollback on server errors
+- ✅ PocketBase validation error handling
+- ✅ Real-time list updates
+- ✅ Loading states during submission
+
+### Example 6: Dashboard with Multiple Data Sources
+
+Advanced example showing joins, aggregations, and combining multiple collections.
+
+```typescript
+// ProjectDashboard.tsx
+import { useLiveQuery } from '@tanstack/react-db';
+import { eq } from '@tanstack/db';
+import { useStore } from './app';
+
+interface Project {
     id: string;
     name: string;
+    status: 'active' | 'completed' | 'archived';
     created: string;
     updated: string;
 }
 
-interface BlogSchema extends SchemaDeclaration {
-    posts: {
-        Row: Post;
-        Relations: {
-            forward: {
-                author: ['users', false];  // Single relation
-                tags: ['tags', true];      // Array relation
-            };
-            back: {};
-        };
-    };
-    users: {
-        Row: User;
-        Relations: {
-            forward: {};
-            back: {
-                posts: ['posts', true];    // One user, many posts
-            };
-        };
-    };
-    tags: {
-        Row: Tag;
-        Relations: {
-            forward: {};
-            back: {
-                posts: ['posts', true];    // One tag, many posts
-            };
+interface Task {
+    id: string;
+    project: string;
+    title: string;
+    completed: boolean;
+    created: string;
+    updated: string;
+}
+
+interface TeamMember {
+    id: string;
+    project: string;
+    user: string;
+    role: 'owner' | 'member';
+    created: string;
+    updated: string;
+}
+
+export function ProjectDashboard({ projectId }: { projectId: string }) {
+    const [projects, tasks, teamMembers, users] = useStore(
+        'projects',
+        'tasks',
+        'team_members',
+        'users'
+    );
+
+    // Get project details
+    const { data: projectList } = useLiveQuery((q) =>
+        q.from({ projects })
+            .where(({ projects }) => eq(projects.id, projectId))
+    );
+    const project = projectList?.[0];
+
+    // Get all tasks for this project
+    const { data: projectTasks } = useLiveQuery((q) =>
+        q.from({ tasks })
+            .where(({ tasks }) => eq(tasks.project, projectId))
+    );
+
+    // Calculate task statistics
+    const totalTasks = projectTasks?.length || 0;
+    const completedTasks = projectTasks?.filter(t => t.completed).length || 0;
+    const progress = totalTasks > 0 ? (completedTasks / totalTasks) * 100 : 0;
+
+    // Get team members with user details using join
+    const { data: team } = useLiveQuery((q) =>
+        q.from({ member: teamMembers })
+            .where(({ member }) => eq(member.project, projectId))
+            .join(
+                { user: users },
+                ({ member, user }) => eq(member.user, user.id),
+                'left'
+            )
+            .select(({ member, user }) => ({
+                id: member.id,
+                role: member.role,
+                user: user ? {
+                    id: user.id,
+                    name: user.name,
+                    email: user.email
+                } : undefined
+            }))
+    );
+
+    // Get upcoming tasks (not completed)
+    const upcomingTasks = projectTasks?.filter(t => !t.completed) || [];
+
+    return (
+        <div className="dashboard">
+            <h1>{project?.name}</h1>
+
+            <div className="stats">
+                <div className="stat-card">
+                    <h3>Progress</h3>
+                    <div className="progress-bar">
+                        <div style={{ width: `${progress}%` }} />
+                    </div>
+                    <p>{completedTasks} / {totalTasks} tasks completed</p>
+                </div>
+
+                <div className="stat-card">
+                    <h3>Team Size</h3>
+                    <p>{team?.length || 0} members</p>
+                </div>
+
+                <div className="stat-card">
+                    <h3>Status</h3>
+                    <p>{project?.status}</p>
+                </div>
+            </div>
+
+            <div className="team">
+                <h2>Team Members</h2>
+                <ul>
+                    {team?.map(member => (
+                        <li key={member.id}>
+                            {member.user?.name} ({member.role})
+                        </li>
+                    ))}
+                </ul>
+            </div>
+
+            <div className="tasks">
+                <h2>Upcoming Tasks ({upcomingTasks.length})</h2>
+                <ul>
+                    {upcomingTasks.map(task => (
+                        <li key={task.id}>
+                            <input
+                                type="checkbox"
+                                checked={task.completed}
+                                onChange={() => {
+                                    tasks.update(task.id, (draft) => {
+                                        draft.completed = !draft.completed;
+                                    });
+                                }}
+                            />
+                            {task.title}
+                        </li>
+                    ))}
+                </ul>
+            </div>
+        </div>
+    );
+}
+```
+
+**What's Demonstrated:**
+- ✅ Multiple collections accessed with variadic `useStore()`
+- ✅ Client-side aggregations (task completion percentage)
+- ✅ TanStack DB joins for nested user data
+- ✅ Real-time dashboard updates
+- ✅ Filtering and transformations
+
+## TypeScript
+
+pbtsdb is fully type-safe. Here's what you need to know:
+
+### Define Your Schema
+
+Use the simple schema format shown in the Quick Start:
+
+```typescript
+type MySchema = {
+    collection_name: {
+        type: RecordInterface;    // Your record type
+        relations: {
+            field_name: RelatedType;  // Related record types
         };
     };
 }
 ```
 
-### Type-Safe Expand
+**Pro tip:** Use [pocketbase-schema-generator](https://github.com/satohshi/pocketbase-schema-generator) to auto-generate types from your PocketBase database.
 
-Use `as const` with the `.expand()` method for type-safe field selection:
+### Type-Safe Collections
+
+Always create collections with proper type parameters:
 
 ```typescript
-const authorsCollection = factory.create('authors');
-const tagsCollection = factory.create('tags');
-
-const postsCollection = factory.create('posts', {
-    expandable: {
-        author: authorsCollection,
-        tags: tagsCollection
-    }
+// ✅ Good - full type safety
+const c = createCollection<MySchema>(pb, queryClient);
+const books = c('books', {
+    omitOnInsert: ['created', 'updated'] as const
 });
 
-// Choose which relations to expand with type safety
-const postsWithRelations = postsCollection.expand(['author', 'tags'] as const);
-// ✅ TypeScript validates these are real relations
-
-// Expanded fields are fully typed
-data[0].expand?.author.username  // ✅ string
-data[0].expand?.tags[0].name     // ✅ string
+// ✅ Good - with expandable relations
+const authors = c('authors', {});
+const books = c('books', {
+    expandable: {
+        author: authors
+    }
+});
 ```
 
 ## Best Practices
 
-### 1. Choose the Right Approach for Relations
+### 1. Define Collections Centrally
 
-**Use Query-Time Expand when:**
-- You need fast, single-query performance
-- Different queries need different expand combinations
-- You want expanded records auto-inserted into their collections
+Define all collections once at app initialization:
 
 ```typescript
-// ✅ Fast, flexible, type-safe
-const authorsCollection = factory.create('authors');
-const booksCollection = factory.create('books', {
+// ✅ Do this - centralized, type-safe
+const c = createCollection<MySchema>(pb, queryClient);
+
+export const { Provider, useStore } = createReactProvider({
+    posts: c('posts', { omitOnInsert: ['created', 'updated'] as const }),
+    users: c('users', {}),
+    comments: c('comments', { omitOnInsert: ['created', 'updated'] as const })
+});
+```
+
+### 2. Create Dependencies Before Dependents
+
+When using expandable collections, create the target collection first:
+
+```typescript
+// ✅ Good - authors exists before books references it
+const c = createCollection<MySchema>(pb, queryClient);
+const authors = c('authors', {});
+const books = c('books', {
     expandable: {
-        author: authorsCollection
+        author: authors  // authors is already created
     }
 });
 
-// Choose what to expand per query
-const booksWithAuthor = booksCollection.expand(['author'] as const);
+// ❌ Bad - can't reference what doesn't exist yet
+const books = c('books', {
+    expandable: {
+        author: ???  // Where is authors?
+    }
+});
 ```
 
-**Use TanStack Joins when:**
-- You need inner/right/full joins
-- Complex client-side filtering after joins
-- Building computed fields from multiple collections
+### 3. Subscriptions are Automatic
+
+Don't manually subscribe - just use `useLiveQuery`:
 
 ```typescript
-// ✅ Flexible, powerful, type-safe
-const { data } = useLiveQuery((q) =>
-    q.from({ book: booksCollection })
-        .join({ author: authorsCollection }, ..., 'inner')
-);
+// ✅ Do this
+const { data } = useLiveQuery((q) => q.from({ posts }));
+
+// ❌ Don't do this
+useEffect(() => {
+    posts.subscribe();
+    return () => posts.unsubscribe();
+}, []);
 ```
 
-### 2. Define Collections Once with createReactCollections
+### 4. Handle Loading States
+
+Always check loading and error states:
 
 ```typescript
-// ✅ Define collections once with automatic type inference
-const { Provider, useStore } = createReactCollections<MySchema>(pb, queryClient)({
-    books: defineCollection('books', {}),
-    authors: defineCollection('authors', {}),
+const { data, isLoading, error } = useLiveQuery((q) => q.from({ posts }));
+
+if (isLoading) return <div>Loading...</div>;
+if (error) return <div>Error: {error.message}</div>;
+if (!data?.length) return <div>No posts found</div>;
+
+return <PostsList posts={data} />;
+```
+
+### 5. Use Expandable for Performance
+
+Use PocketBase's expand feature for better performance:
+
+```typescript
+// ✅ Fast - single query with server-side expand
+const c = createCollection<MySchema>(pb, queryClient);
+const authors = c('authors', {});
+const posts = c('posts', {
+    expandable: {
+        author: authors
+    }
 });
 
-// Use throughout app
-<Provider>
-    <App />
-</Provider>
+const postsWithAuthor = posts.expand(['author'] as const);
+const { data } = useLiveQuery((q) => q.from({ posts: postsWithAuthor }));
 
-// No manual type declarations needed - fully typed automatically!
+// ⚠️ Slower - multiple queries + client-side join
+// Only use TanStack DB joins for inner/right/full join behavior
 ```
 
-### 3. Collections are Automatically Typed
-
-```typescript
-// ✅ Types inferred from createReactCollections config
-const books = useStore('books');  // Fully typed!
-
-// ✅ Multiple collections with variadic arguments
-const [books, authors] = useStore('books', 'authors');  // Fully typed array!
-
-// ❌ TypeScript error: key doesn't exist in config
-const invalid = useStore('nonexistent');  // Compile error!
-```
-
-### 4. Handle Loading and Error States
-
-```typescript
-const { data, isLoading, error } = useLiveQuery((q) =>
-    q.from({ books: booksCollection })
-);
-
-if (isLoading) return <Spinner />;
-if (error) return <ErrorMessage error={error} />;
-if (!data?.length) return <EmptyState />;
-
-return <BooksList books={data} />;
-```
-
-### 5. Subscriptions are Automatic
-
-No need to manually subscribe/unsubscribe - the library handles it:
-
-```typescript
-// ❌ Don't do this (unless you have advanced use case)
-useEffect(() => {
-    booksCollection.subscribe();
-    return () => booksCollection.unsubscribe();
-}, []);
-
-// ✅ Do this instead - automatic lifecycle management
-const { data } = useLiveQuery((q) =>
-    q.from({ books: booksCollection })
-);
-```
-
-### 6. Use QueryClient Configuration
+### 6. Configure QueryClient Defaults
 
 ```typescript
 const queryClient = new QueryClient({
     defaultOptions: {
         queries: {
-            staleTime: 1000 * 60 * 5, // 5 minutes
-            gcTime: 1000 * 60 * 10,   // 10 minutes
-            retry: 3,
-            refetchOnWindowFocus: false,
-        },
-    },
+            staleTime: 60_000,      // 1 minute
+            gcTime: 300_000,        // 5 minutes
+            refetchOnWindowFocus: false
+        }
+    }
 });
 ```
 

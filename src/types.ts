@@ -166,19 +166,19 @@ export interface ExpandableCollection<
      *
      * // Expand only customer
      * const { data } = useLiveQuery((q) =>
-     *     q.from({ jobs: jobsCollection.expand(['customer'] as const) })
+     *     q.from({ jobs: jobsCollection.expand('customer') })
      * );
      * // data[0].expand.customer is typed and available
      * // customersCollection also contains the expanded customer records
      *
      * // Expand multiple relations
      * const { data: detailed } = useLiveQuery((q) =>
-     *     q.from({ jobs: jobsCollection.expand(['customer', 'address'] as const) })
+     *     q.from({ jobs: jobsCollection.expand('customer', 'address') })
      * );
      * ```
      */
-    expand<Fields extends readonly (keyof ExtractRelations<Schema, CollectionName> & string)[]>(
-        fields: Fields
+    expand<Fields extends (keyof ExtractRelations<Schema, CollectionName> & string)[]>(
+        ...fields: Fields
     ): Collection<WithExpandFromArray<RecordType, Schema, CollectionName, Fields>>;
 }
 
@@ -328,18 +328,28 @@ export type WithExpandFromArray<
 export type NonNullable<T> = T extends (infer U) | undefined ? U : T;
 
 /**
- * Converts a schema relation type to its corresponding Collection type.
+ * Extracts the output type from a Collection type.
+ * @internal
+ */
+type ExtractCollectionOutput<C> = C extends Collection<infer TOutput, any, any, any, any> ? TOutput : never;
+
+/**
+ * Converts a schema relation type to its corresponding Collection constraint.
  * Handles both single relations (T) and array relations (T[]).
+ * Accepts collections with any insert type to support omitOnInsert configurations.
+ *
+ * Uses constraint (extends Collection<T, ...>) rather than exact type to allow
+ * collections with different TInput types (from omitOnInsert) to be compatible.
  *
  * @example
- * RelationAsCollection<Customer> => Collection<Customer>
- * RelationAsCollection<Customer[]> => Collection<Customer>
+ * RelationAsCollection<Customer> => Collection<Customer, string | number, any, any, any>
+ * RelationAsCollection<Customer[]> => Collection<Customer, string | number, any, any, any>
  * @internal
  */
 export type RelationAsCollection<T> =
     T extends Array<infer U>
-        ? U extends object ? Collection<U> : Collection<object>
-        : T extends object ? Collection<T> : Collection<object>;
+        ? U extends object ? Collection<U, string | number, any, any, any> : Collection<object, string | number, any, any, any>
+        : T extends object ? Collection<T, string | number, any, any, any> : Collection<object, string | number, any, any, any>;
 
 /**
  * Configuration for relations - maps field names to their TanStack DB collections.
@@ -450,7 +460,7 @@ export interface CreateCollectionOptions<
      *
      * // In query - choose which to expand
      * const { data } = useLiveQuery((q) =>
-     *     q.from({ jobs: jobsCollection.expand(['customer'] as const) })
+     *     q.from({ jobs: jobsCollection.expand('customer') })
      * );
      * ```
      */

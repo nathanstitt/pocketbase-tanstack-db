@@ -99,7 +99,7 @@ describe('Collection - Relations', () => {
 
         const { result } = renderHook(() =>
             useLiveQuery((q) =>
-                q.from({ books: booksCollection.expand(['author'] as const) })
+                q.from({ books: booksCollection.expand('author') })
             )
         )
 
@@ -133,7 +133,7 @@ describe('Collection - Relations', () => {
             }
         })
 
-        const booksWithAuthor = booksCollection.expand(['author'] as const)
+        const booksWithAuthor = booksCollection.expand('author')
 
         // Get an author ID to filter by
         const allBooks = await pb.collection('books').getList(1, 10, {

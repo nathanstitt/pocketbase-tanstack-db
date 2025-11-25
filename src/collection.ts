@@ -24,13 +24,6 @@ export type {
     RelationsConfig,
 } from './types';
 
-/**
- * Configuration for collections passed to createCollections().
- * Maps collection keys to their configuration options.
- */
-export type CollectionsConfig<Schema extends SchemaDeclaration> = {
-    [K in keyof Schema]?: CreateCollectionOptions<Schema, K>;
-};
 
 /**
  * Inferred type for a single collection from config.
@@ -53,20 +46,6 @@ type InferCollectionType<
    JoinHelper<Schema, C, ExtractRecordType<Schema, C>> &
    ExpandableCollection<Schema, C, ExtractRecordType<Schema, C>>;
 
-/**
- * Builds a map of collection keys to their inferred Collection types.
- * @internal
- */
-export type InferCollectionsMap<
-    Schema extends SchemaDeclaration,
-    Config extends CollectionsConfig<Schema>
-> = {
-    [K in keyof Config]: K extends keyof Schema
-        ? Config[K] extends CreateCollectionOptions<Schema, K>
-            ? InferCollectionType<Schema, K, Config[K]>
-            : never
-        : never;
-};
 
 /**
  * Internal helper to create a single collection with all enhancements.
@@ -146,8 +125,8 @@ function createSingleCollection<
             await subscriptionManager.waitForSubscription(collectionName, recordId, timeoutMs);
         },
         relations: options?.relations || {} as RelationsConfig<Schema, C>,
-        expand: <Fields extends readonly (keyof ExtractRelations<Schema, C> & string)[]>(
-            fields: Fields
+        expand: <Fields extends (keyof ExtractRelations<Schema, C> & string)[]>(
+            ...fields: Fields
         ): Collection<WithExpandFromArray<RecordType, Schema, C, Fields>> => {
             if (!options?.expandable) {
                 throw new Error(
@@ -288,7 +267,7 @@ function getSubscriptionManager(pb: PocketBase, queryClient: QueryClient): Subsc
  *     }
  * });
  *
- * const booksWithAuthor = booksCollection.expand(['author'] as const);
+ * const booksWithAuthor = booksCollection.expand('author');
  * ```
  */
 export function createCollection<Schema extends SchemaDeclaration>(
@@ -314,88 +293,3 @@ export function createCollection<Schema extends SchemaDeclaration>(
     };
 }
 
-/**
- * Creates a map of type-safe TanStack DB collections backed by PocketBase.
- * This is the universal collection creation function that works everywhere (React, Node.js, etc.).
- *
- * @param pb - PocketBase client instance
- * @param queryClient - TanStack Query client
- * @param config - Configuration object mapping collection names to their options
- * @returns Map of collection names to their fully-typed Collection instances
- *
- * @example
- * Basic usage:
- * ```ts
- * const collections = createCollections<Schema>(pb, queryClient)({
- *     books: {},
- *     authors: {}
- * });
- *
- * // Use directly (non-React)
- * const books = await collections.books.getFullList();
- * ```
- *
- * @example
- * With omitOnInsert:
- * ```ts
- * const collections = createCollections<Schema>(pb, queryClient)({
- *     books: {
- *         omitOnInsert: ['created', 'updated'] as const
- *     }
- * });
- *
- * // Insert without server-generated fields
- * collections.books.insert({
- *     id: newRecordId(),
- *     title: 'New Book',
- *     // created and updated are optional
- * });
- * ```
- *
- * @example
- * React integration (use with createReactProvider):
- * ```tsx
- * const collections = createCollections<Schema>(pb, queryClient)({
- *     books: {},
- *     authors: {}
- * });
- *
- * const { Provider, useStore } = createReactProvider(collections);
- * ```
- *
- * @example
- * With expandable relations (create dependencies separately):
- * ```ts
- * // For expandable, use createCollection (singular) instead:
- * const authorsCollection = createCollection<Schema>(pb, queryClient)('authors', {});
- * const booksCollection = createCollection<Schema>(pb, queryClient)('books', {
- *     expandable: { author: authorsCollection }
- * });
- * ```
- */
-export function createCollections<Schema extends SchemaDeclaration>(
-    pb: PocketBase,
-    queryClient: QueryClient
-) {
-    return <Config extends CollectionsConfig<Schema>>(
-        config: Config
-    ): InferCollectionsMap<Schema, Config> => {
-        const subscriptionManager = getSubscriptionManager(pb, queryClient);
-
-        const collections = Object.fromEntries(
-            Object.entries(config).map(([key, opts]) => {
-                const collectionName = key as keyof Schema & string;
-                const collection = createSingleCollection(
-                    pb,
-                    queryClient,
-                    subscriptionManager,
-                    collectionName,
-                    opts as any
-                );
-                return [key, collection];
-            })
-        ) as unknown as InferCollectionsMap<Schema, Config>;
-
-        return collections;
-    };
-}

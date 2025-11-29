@@ -6,12 +6,12 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
-- Initial release of pocketbase-tanstack-db
-- `CollectionFactory` class for creating type-safe TanStack DB collections from PocketBase
+- Initial release of pbtsdb
+- `createCollection` curried function for creating type-safe TanStack DB collections from PocketBase
 - Full TypeScript support with strict type checking
 - Real-time subscription management with automatic reconnection
 - `SubscriptionManager` for handling PocketBase real-time updates
-- React integration with `CollectionsProvider`, `useStore` hook
+- React integration with `createReactProvider`, `useStore` hook
 - Type-safe relation expansion with `expand` option
 - Manual join support with `relations` configuration
 - Comprehensive type definitions for schema declarations

@@ -2,23 +2,64 @@ import { QueryClient } from '@tanstack/react-query'
 import PocketBase from 'pocketbase'
 import type { Collection } from '@tanstack/db'
 import 'dotenv/config'
-import { createCollection, newRecordId } from '../src'
+import { createCollection, newRecordId, setLogger, resetLogger, type Logger } from '../src'
 import type { Schema } from './schema'
 
 export { newRecordId }
+
+/**
+ * Captures log messages during tests.
+ * Call createTestLogger() to get a logger that stores messages in arrays.
+ */
+export interface TestLogger extends Logger {
+    messages: {
+        debug: Array<{ msg: string; context?: object }>;
+        warn: Array<{ msg: string; context?: object }>;
+        error: Array<{ msg: string; context?: object }>;
+    };
+    clear: () => void;
+}
+
+/**
+ * Creates a test logger that captures all log messages.
+ * Use with setLogger() to capture messages during tests.
+ */
+export function createTestLogger(): TestLogger {
+    const messages: TestLogger['messages'] = {
+        debug: [],
+        warn: [],
+        error: [],
+    };
+
+    return {
+        messages,
+        debug: (msg: string, context?: object) => {
+            messages.debug.push({ msg, context });
+        },
+        warn: (msg: string, context?: object) => {
+            messages.warn.push({ msg, context });
+        },
+        error: (msg: string, context?: object) => {
+            messages.error.push({ msg, context });
+        },
+        clear: () => {
+            messages.debug = [];
+            messages.warn = [];
+            messages.error = [];
+        },
+    };
+}
+
+export { setLogger, resetLogger }
 
 /**
  * Compatibility shim for old CollectionFactory API.
  * Returns an object with a create() method that matches the old factory pattern.
  */
 export function createCollectionFactory(queryClient: QueryClient) {
+    const factory = createCollection<Schema>(pb, queryClient);
     return {
-        create: <C extends keyof Schema & string, Opts = any>(
-            collectionName: C,
-            options?: Opts
-        ) => {
-            return createCollection<Schema>(pb, queryClient)(collectionName, options as any);
-        }
+        create: factory
     };
 }
 
@@ -77,7 +118,10 @@ export function getCurrentOrg(): string | undefined {
 /**
  * Create a books collection with the given query client
  */
-export function createBooksCollection(queryClient: QueryClient, options?: { syncMode?: 'eager' | 'on-demand' }) {
+export function createBooksCollection(
+    queryClient: QueryClient,
+    options?: { syncMode?: 'eager' | 'on-demand' }
+) {
     return createCollection<Schema>(pb, queryClient)('books', {
         syncMode: options?.syncMode
     })

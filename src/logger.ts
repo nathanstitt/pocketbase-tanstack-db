@@ -69,19 +69,14 @@ export const logger: Logger = {
  *
  * @example
  * ```ts
- * import { setLogger } from 'pocketbase-tanstack-db';
+ * import { setLogger } from 'pbtsdb';
  *
- * // Example: Integration with a custom logging service
+ * // Integration with a custom logging service
  * setLogger({
- *     debug: (msg, context) => {
- *         myLogger.debug(msg, context);
- *     },
- *     warn: (msg, context) => {
- *         myLogger.warn(msg, context);
- *     },
+ *     debug: (msg, context) => myLogger.debug(msg, context),
+ *     warn: (msg, context) => myLogger.warn(msg, context),
  *     error: (msg, context) => {
  *         myLogger.error(msg, context);
- *         // Also send to error tracking service
  *         Sentry.captureMessage(msg, { level: 'error', extra: context });
  *     },
  * });
@@ -89,7 +84,7 @@ export const logger: Logger = {
  *
  * @example
  * ```ts
- * // Example: Disable all logging
+ * // Disable all logging
  * setLogger({
  *     debug: () => {},
  *     warn: () => {},

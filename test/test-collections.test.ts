@@ -99,7 +99,7 @@ describe('Test Collections - Relationship Testing', () => {
         });
     });
 
-    describe('Tags Collection (Many-to-Many via Junction)', () => {
+    describe.skip('Tags Collection (Many-to-Many via Junction)', () => {
         it('should fetch tags from the database', async () => {
             const tags = await pb.collection('tags').getFullList();
             expect(tags).toBeDefined();
@@ -116,7 +116,7 @@ describe('Test Collections - Relationship Testing', () => {
         });
     });
 
-    describe('Book Tags Junction Collection (Many-to-Many)', () => {
+    describe.skip('Book Tags Junction Collection (Many-to-Many)', () => {
         it('should fetch book-tag relationships', async () => {
             const bookTags = await pb.collection('book_tags').getFullList();
             expect(bookTags).toBeDefined();

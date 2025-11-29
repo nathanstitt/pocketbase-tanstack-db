@@ -117,70 +117,71 @@ This library may NOT be suitable if:
 
 ## Architecture
 
-### CollectionFactory Pattern
+### createCollection Pattern
 
-The `CollectionFactory` class (`src/collection.ts`) is the core abstraction that connects PocketBase to TanStack DB:
+The `createCollection` function (`src/collection.ts`) is the core abstraction that connects PocketBase to TanStack DB. It uses a curried API for better type inference:
 
 ```typescript
-class CollectionFactory<Schema extends SchemaDeclaration, TMaxDepth extends 0 | 1 | 2 | 3 | 4 | 5 | 6 = 2>
+const c = createCollection<Schema>(pb, queryClient);
+const collection = c(collectionName, options);
 ```
 
 **Responsibilities:**
 1. Create type-safe TanStack DB collections from PocketBase collections
 2. Integrate with React Query's QueryClient for state management
-3. Fetch full collection lists from PocketBase (lazy - only when queried)
+3. Fetch collection data from PocketBase
 4. Provide automatic key management based on record IDs
 5. Manage real-time subscriptions automatically based on query lifecycle
 
 **Usage Pattern:**
 ```typescript
-const collection = new CollectionFactory(pb, queryClient)
-    .create<JobsRecord, Schema>('jobs');
+const c = createCollection<Schema>(pb, queryClient);
+const jobsCollection = c('jobs', {});
 ```
 
-### Understanding CollectionFactory vs Collection
+### Understanding createCollection vs Collection
 
-**CollectionFactory** (class):
-- Factory that creates Collection instances
-- One instance per PocketBase + QueryClient pair
-- Provides `.create()` method to instantiate collections
-- Manages subscription lifecycle across all collections
+**createCollection** (curried function):
+- Returns a function that creates Collection instances
+- First call takes PocketBase and QueryClient (schema-level)
+- Second call takes collection name and options (collection-level)
+- Manages subscription lifecycle across collections
 
 **Collection** (type/instance):
-- Reactive data structure returned by `factory.create()`
+- Reactive data structure returned by the curried function
 - Represents a single PocketBase collection (e.g., 'jobs', 'users')
-- Provides query methods (`getFullList`, `subscribe`, etc.)
+- Provides query methods and subscription capabilities
 - Used with `useLiveQuery` for reactive data
 
 **Example Workflow:**
 ```typescript
-// Step 1: Create factory (ONCE per app)
-const factory = new CollectionFactory(pb, queryClient);
+// Step 1: Create curried function (ONCE per app)
+const c = createCollection<Schema>(pb, queryClient);
 
 // Step 2: Create collections (ONCE per collection type)
-const jobsCollection = factory.create('jobs');     // Returns Collection<Jobs>
-const usersCollection = factory.create('users');   // Returns Collection<Users>
+const jobsCollection = c('jobs', {});       // Returns Collection<Jobs>
+const usersCollection = c('users', {});     // Returns Collection<Users>
 
 // Step 3: Use collections in components (MANY times)
 const { data } = useLiveQuery((q) => q.from({ jobs: jobsCollection }));
 ```
 
-**IMPORTANT - Single Factory Pattern:**
+**IMPORTANT - Single Curried Function Pattern:**
 ```typescript
-// ✅ GOOD: One factory, multiple collections
-const factory = new CollectionFactory(pb, queryClient);
-const jobs = factory.create('jobs');
-const customers = factory.create('customers');
-const users = factory.create('users');
+// ✅ GOOD: One curried function, multiple collections
+const c = createCollection<Schema>(pb, queryClient);
+const jobs = c('jobs', {});
+const customers = c('customers', {});
+const users = c('users', {});
 
-// ❌ BAD: Multiple factories for same PocketBase instance
-const factory1 = new CollectionFactory(pb, queryClient);
-const jobs = factory1.create('jobs');
-const factory2 = new CollectionFactory(pb, queryClient);  // Wasteful!
-const customers = factory2.create('customers');
+// ❌ BAD: Multiple curried functions for same PocketBase instance
+const c1 = createCollection<Schema>(pb, queryClient);
+const jobs = c1('jobs', {});
+const c2 = createCollection<Schema>(pb, queryClient);  // Wasteful!
+const customers = c2('customers', {});
 ```
 
-**Why?** Each factory manages its own subscription lifecycle. Multiple factories create duplicate SSE connections to the same PocketBase server, wasting resources and causing race conditions.
+**Why?** Each createCollection call creates its own subscription manager. Multiple instances create duplicate SSE connections to the same PocketBase server, wasting resources and causing race conditions.
 
 ### Type Safety Requirements
 
@@ -260,8 +261,8 @@ The `npm test` command automatically:
 await pb.collection('users').authWithPassword(email, password);
 
 // Create collection
-const collection = new CollectionFactory(pb, queryClient)
-    .create<Record, Schema>('collection_name');
+const c = createCollection<Schema>(pb, queryClient);
+const collection = c('collection_name', {});
 
 // Fetch and assert
 const records = await collection.getFullList();
@@ -270,7 +271,7 @@ expect(records.length).toBeGreaterThan(0);
 
 **When to Write Tests:**
 - Adding new collection types
-- Modifying CollectionFactory logic
+- Modifying createCollection logic
 - Changing query behavior
 - Adding new methods or features
 
@@ -332,11 +333,16 @@ export type Schema = {
 Use when you need **server-side performance** with a single query.
 
 ```typescript
-const collections = new CollectionFactory<Schema>(pb, queryClient);
+const c = createCollection<Schema>(pb, queryClient);
 
-// Type-safe expand with full autocomplete
-const jobsCollection = collections.create('jobs', {
-    expand: 'customer,address' as const
+// Create collections with auto-expand
+const customersCollection = c('customers', {});
+const addressesCollection = c('addresses', {});
+const jobsCollection = c('jobs', {
+    expand: {
+        customer: customersCollection,
+        address: addressesCollection
+    }
 });
 
 // REACT REQUIRED: useLiveQuery is a React hook from @tanstack/react-db
@@ -369,15 +375,11 @@ if (data[0]?.expand) {
 Use when you need **client-side join flexibility** or complex query logic.
 
 ```typescript
-const collections = new CollectionFactory<Schema>(pb, queryClient);
+const c = createCollection<Schema>(pb, queryClient);
 
-// Create collections with relations config
-const customersCollection = collections.create('customers');
-const jobsCollection = collections.create('jobs', {
-    relations: {
-        customer: customersCollection  // ✅ Type-checked
-    }
-});
+// Create collections
+const customersCollection = c('customers', {});
+const jobsCollection = c('jobs', {});
 
 // REACT REQUIRED: useLiveQuery is a React hook
 const { data } = useLiveQuery((q) =>
@@ -442,18 +444,7 @@ const customerName: string | undefined = data[0]?.expand?.customer?.name;  // �
        )
    ```
 
-3. **Combine Both Approaches:**
-   ```typescript
-   // ✅ GOOD: Expand for some, join for complex logic
-   const jobs = collections.create('jobs', {
-       expand: 'address' as const,  // Simple expansion
-       relations: {
-           customer: customersCollection  // For manual joins
-       }
-   });
-   ```
-
-4. **Use `as const` for Expand Strings:**
+3. **Use `as const` for Expand Strings:**
    ```typescript
    // ✅ GOOD: Enables proper type inference
    const jobs = collections.create('jobs', {
@@ -470,25 +461,16 @@ const customerName: string | undefined = data[0]?.expand?.customer?.name;  // �
        const city = data[0].expand.address.city;   // ✅ Fully type-safe
    }
 
-   // ❌ BAD: Type inference limited
-   const jobs = collections.create('jobs', {
-       expand: 'customer,address'  // TypeScript treats as generic string
-   });
-   // data[0].expand is typed as `Record<string, any>` - NO type safety!
-   // No autocomplete, no type checking
-   if (data[0]?.expand) {
-       const name = data[0].expand.customer.name;  // ⚠️ No error even if wrong!
-   }
+   // Note: The expand option takes a map of field names to their target collections,
+   // which provides full type safety automatically.
    ```
-
-   **Why it matters:** Without `as const`, TypeScript cannot map the expand string to your schema relations, resulting in `any` types which defeats the purpose of this type-safe library.
 
 ### Working with Collections
 
 **1. Creating Collections:**
 ```typescript
-const collection = new CollectionFactory(pb, queryClient)
-    .create<RecordType, Schema>('collection_name');
+const c = createCollection<Schema>(pb, queryClient);
+const collection = c('collection_name', {});
 ```
 
 **2. Fetching Data (Two Approaches):**
@@ -563,14 +545,17 @@ await tx.isPersisted.promise;
 
 ## React Integration
 
-### createReactCollections()
+### createCollection() and createReactProvider()
 
-**NEW in v1.0.0:** The recommended way to integrate pbtsdb with React applications. This function eliminates the need for manual module augmentation and provides automatic type inference.
+The recommended way to integrate pbtsdb with React applications. Uses a two-step approach:
+1. Create collections with `createCollection()` (curried API)
+2. Wrap them for React with `createReactProvider()`
 
 #### Basic Usage
 
 ```typescript
-import { createReactCollections, defineCollection } from 'pocketbase-tanstack-db';
+import { createCollection, createReactProvider, newRecordId } from 'pbtsdb';
+import { useLiveQuery } from '@tanstack/react-db';
 import PocketBase from 'pocketbase';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
@@ -578,7 +563,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 const pb = new PocketBase('http://localhost:8090');
 const queryClient = new QueryClient();
 
-// Define your schema (same as before)
+// Define your schema
 type MySchema = {
     books: {
         type: Books;
@@ -592,13 +577,21 @@ type MySchema = {
     };
 }
 
-// Create typed React integration - automatic type inference!
-const { Provider, useStore } = createReactCollections<MySchema>(pb, queryClient)({
-    books: defineCollection('books', {
-        expand: 'author' as const  // Type-safe expand
-    }),
-    authors: defineCollection('authors', {}),
+// Step 1: Create collections using curried API
+const c = createCollection<MySchema>(pb, queryClient);
+const authorsCollection = c('authors', {});
+const booksCollection = c('books', {
+    expand: {
+        author: authorsCollection  // Auto-expand and auto-upsert
+    }
 });
+
+// Step 2: Wrap for React
+const collections = {
+    books: booksCollection,
+    authors: authorsCollection,
+};
+const { Provider, useStore } = createReactProvider(collections);
 
 // Wrap your app
 function App() {
@@ -611,9 +604,9 @@ function App() {
     );
 }
 
-// Use in components
+// Use in components - useStore returns an array!
 function BooksList() {
-    const books = useStore('books');  // ✅ Fully typed automatically!
+    const [books] = useStore('books');  // ✅ Destructure from array
 
     const { data, isLoading } = useLiveQuery((q) =>
         q.from({ books })
@@ -637,22 +630,25 @@ function BooksList() {
 
 #### Using omitOnInsert with React Collections
 
-You can specify omittable fields when defining collections:
+You can specify omittable fields when creating collections:
 
 ```typescript
-const { Provider, useStore } = createReactCollections<MySchema>(pb, queryClient)({
-    books: defineCollection('books', {
-        omitOnInsert: ['created', 'updated'] as const,
-        expand: 'author' as const
-    }),
-    authors: defineCollection('authors', {
-        omitOnInsert: ['created', 'updated'] as const
-    }),
+const c = createCollection<MySchema>(pb, queryClient);
+const authors = c('authors', {
+    omitOnInsert: ['created', 'updated'] as const
 });
+const books = c('books', {
+    omitOnInsert: ['created', 'updated'] as const,
+    expand: {
+        author: authors
+    }
+});
+
+const { Provider, useStore } = createReactProvider({ books, authors });
 
 // In your component
 function AddBook() {
-    const books = useStore('books');
+    const [books] = useStore('books');
 
     const handleAddBook = async (authorId: string) => {
         // Insert without created/updated - they're optional now!
@@ -676,24 +672,25 @@ function AddBook() {
 
 #### Key Benefits
 
-1. **Automatic Type Inference** - No manual `declare module` augmentation needed
-2. **Single Source of Truth** - Types flow from config → Provider → useStore
-3. **Impossible Type Mismatches** - TypeScript enforces that keys match config
-4. **Scoped Contexts** - Each `createReactCollections` creates isolated Provider/useStore pair
+1. **Automatic Type Inference** - Types flow from schema through createCollection to useStore
+2. **Single Source of Truth** - Collections defined once, used everywhere
+3. **Impossible Type Mismatches** - TypeScript enforces that keys match collections map
+4. **Scoped Contexts** - Each createReactProvider creates isolated Provider/useStore pair
 
 #### Collection Name Override
 
-By default, keys in the config object map to PocketBase collection names. You can override this:
+Keys in the collections object become the useStore keys. The PocketBase collection name is set in createCollection:
 
 ```typescript
-const { Provider, useStore } = createReactCollections<MySchema>(pb, queryClient)({
-    myBooks: defineCollection('books', {  // Key 'myBooks', collection 'books'
-        expand: 'author' as const
-    })
-});
+const c = createCollection<MySchema>(pb, queryClient);
+const collections = {
+    myBooks: c('books', {})  // Key 'myBooks', PocketBase collection 'books'
+};
+
+const { Provider, useStore } = createReactProvider(collections);
 
 // Access via custom key
-const myBooks = useStore('myBooks');
+const [myBooks] = useStore('myBooks');
 ```
 
 #### Variadic useStore
@@ -702,7 +699,7 @@ Access multiple collections at once:
 
 ```typescript
 function BooksWithAuthors() {
-    const [books, authors] = useStore('books', 'authors');  // ✅ Fully typed array!
+    const [books, authors] = useStore('books', 'authors');  // ✅ Fully typed tuple!
 
     const { data } = useLiveQuery((q) =>
         q.from({ book: books })
@@ -720,36 +717,37 @@ function BooksWithAuthors() {
 #### Type Safety Guarantees
 
 ```typescript
-const { Provider, useStore } = createReactCollections<MySchema>(pb, queryClient)({
-    books: defineCollection('books', {}),
-    authors: defineCollection('authors', {}),
+const c = createCollection<MySchema>(pb, queryClient);
+const { Provider, useStore } = createReactProvider({
+    books: c('books', {}),
+    authors: c('authors', {}),
 });
 
 // ✅ TypeScript knows these exist
-const books = useStore('books');
-const authors = useStore('authors');
+const [books] = useStore('books');
+const [authors] = useStore('authors');
 const [b, a] = useStore('books', 'authors');
 
 // ❌ TypeScript compile error: key doesn't exist
-const invalid = useStore('nonexistent');
+const [invalid] = useStore('nonexistent');
 ```
 
 
-### Non-React Usage (Advanced)
+### Non-React Usage
 
-If you need collections outside of React (Node.js, Vue, etc.), use `CollectionFactory` directly:
+For non-React environments (Node.js, Vue, etc.), use `createCollection` directly:
 
 ```typescript
-import { CollectionFactory } from 'pocketbase-tanstack-db';
+import { createCollection } from 'pbtsdb';
 
-const factory = new CollectionFactory<MySchema>(pb, queryClient);
-const booksCollection = factory.create('books');
+const c = createCollection<MySchema>(pb, queryClient);
+const booksCollection = c('books', {});
 
-// Manual data access (non-reactive)
-const books = await booksCollection.getFullList();
+// Collections have TanStack DB interface
+// Can be used with useLiveQuery or accessed directly
 ```
 
-**Note:** `CollectionFactory` is kept in the API for non-React use cases and advanced scenarios. For React applications, always use `createReactCollections`.
+**Note:** `createCollection` works in any environment. `createReactProvider` is only needed for React context integration.
 
 ## Error Handling
 
@@ -911,7 +909,7 @@ jobsCollection.unsubscribeAll();
 
 **1. Lazy Initialization:**
 - Collections created with `factory.create()` do NOT start subscriptions immediately
-- No network activity occurs until the first React component calls `useLiveQuery` with the collection
+- For 'on-demand' collections, no network activity occurs until the first React component calls `useLiveQuery` with the collection
 
 **2. Automatic Start:**
 - When the FIRST React component renders with `useLiveQuery` using a collection
@@ -1044,8 +1042,8 @@ interface Schema extends SchemaDeclaration {
 3. **Write integration test** in `test/collection.test.ts`:
 ```typescript
 it('should fetch new_collection records', async () => {
-    const collection = new CollectionFactory(pb, queryClient)
-        .create<NewCollectionRecord, Schema>('new_collection');
+    const c = createCollection<Schema>(pb, queryClient);
+    const collection = c('new_collection', {});
 
     const records = await collection.getFullList();
     expect(records).toBeDefined();
@@ -1054,7 +1052,7 @@ it('should fetch new_collection records', async () => {
 
 4. **Run tests**: `npm test`
 
-### Modifying CollectionFactory
+### Modifying createCollection
 
 1. Read `src/collection.ts` first
 2. Understand the generic constraints

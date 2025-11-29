@@ -6,6 +6,14 @@ import type { UnsubscribeFunc } from 'pocketbase';
 // ============================================================================
 
 /**
+ * Base record type required by PocketBase collections.
+ * All records must have an 'id' field.
+ */
+export interface BaseRecord {
+    id: string;
+}
+
+/**
  * Schema declaration for type-safe collection management.
  * Define your PocketBase collections with their record types and relations.
  *
@@ -23,9 +31,9 @@ import type { UnsubscribeFunc } from 'pocketbase';
  */
 export interface SchemaDeclaration {
     [collectionName: string]: {
-        type: object;
+        type: BaseRecord;
         relations?: {
-            [fieldName: string]: object | object[];
+            [fieldName: string]: BaseRecord | BaseRecord[];
         };
     };
 }
@@ -91,98 +99,6 @@ export interface SubscribableCollection<T extends object = object> {
 }
 
 // ============================================================================
-// Collection Enhancement Types
-// ============================================================================
-
-/**
- * Join helper for type-safe TanStack DB joins.
- * Provides access to pre-configured relation collections.
- */
-export interface JoinHelper<
-    Schema extends SchemaDeclaration,
-    CollectionName extends keyof Schema,
-    RecordType extends object
-> {
-    /**
-     * Get a pre-configured collection for joining a relation field.
-     * This returns the related collection that can be used with TanStack DB's .join() method.
-     *
-     * @param fieldName - The relation field name to join
-     * @returns The collection for the related entity, or undefined if not configured
-     *
-     * @example
-     * ```ts
-     * const customersCollection = createCollection<Schema>(pb, queryClient)('customers');
-     * const addressesCollection = createCollection<Schema>(pb, queryClient)('addresses');
-     *
-     * const jobsCollection = createCollection<Schema>(pb, queryClient)('jobs', {
-     *     relations: {
-     *         customer: customersCollection,
-     *         address: addressesCollection
-     *     }
-     * });
-     *
-     * // Use with TanStack DB joins
-     * const query = q.from({ job: jobsCollection })
-     *     .join(
-     *         { customer: jobsCollection.relations.customer },
-     *         ({ job, customer }) => eq(job.customer, customer.id),
-     *         'left'
-     *     );
-     * ```
-     */
-    relations: RelationsConfig<Schema, CollectionName>;
-}
-
-/**
- * Enhanced collection interface with query-time expand capabilities.
- * Allows selecting which relations to expand per-query with automatic insertion into target collections.
- */
-export interface ExpandableCollection<
-    Schema extends SchemaDeclaration,
-    CollectionName extends keyof Schema,
-    RecordType extends object
-> {
-    /**
-     * Create a collection variant with specified relations expanded.
-     * The expanded records are automatically inserted into their target collections.
-     *
-     * @param fields - Array of relation field names to expand (must be defined in expandable config)
-     * @returns A collection variant with the specified fields expanded
-     *
-     * @example
-     * ```ts
-     * const customersCollection = createCollection<Schema>(pb, queryClient)('customers');
-     * const addressesCollection = createCollection<Schema>(pb, queryClient)('addresses');
-     * const tagsCollection = createCollection<Schema>(pb, queryClient)('tags');
-     *
-     * const jobsCollection = createCollection<Schema>(pb, queryClient)('jobs', {
-     *     expandable: {
-     *         customer: customersCollection,
-     *         address: addressesCollection,
-     *         tags: tagsCollection
-     *     }
-     * });
-     *
-     * // Expand only customer
-     * const { data } = useLiveQuery((q) =>
-     *     q.from({ jobs: jobsCollection.expand('customer') })
-     * );
-     * // data[0].expand.customer is typed and available
-     * // customersCollection also contains the expanded customer records
-     *
-     * // Expand multiple relations
-     * const { data: detailed } = useLiveQuery((q) =>
-     *     q.from({ jobs: jobsCollection.expand('customer', 'address') })
-     * );
-     * ```
-     */
-    expand<Fields extends (keyof ExtractRelations<Schema, CollectionName> & string)[]>(
-        ...fields: Fields
-    ): Collection<WithExpandFromArray<RecordType, Schema, CollectionName, Fields>>;
-}
-
-// ============================================================================
 // Schema Extraction Utilities
 // ============================================================================
 
@@ -194,6 +110,13 @@ export type ExtractRecordType<
     Schema extends SchemaDeclaration,
     CollectionName extends keyof Schema
 > = Schema[CollectionName]['type'];
+
+/**
+ * Valid field names that can be omitted during insert operations.
+ * Excludes 'id' which is always required for TanStack DB record tracking.
+ * @internal
+ */
+export type OmittableFields<T extends object> = Exclude<keyof T, 'id'>;
 
 /**
  * Computes the insert input type by making specified fields optional.
@@ -210,7 +133,7 @@ export type ExtractRecordType<
  */
 export type ComputeInsertType<
     T extends object,
-    OmitFields extends readonly (Exclude<keyof T, 'id'>)[]
+    OmitFields extends readonly OmittableFields<T>[]
 > = Omit<T, OmitFields[number]> & Partial<Pick<T, OmitFields[number]>>;
 
 /**
@@ -222,18 +145,6 @@ export type ExtractRelations<
     Schema extends SchemaDeclaration,
     CollectionName extends keyof Schema
 > = Schema[CollectionName] extends { relations: infer R } ? R : never;
-
-/**
- * Extracts expandable field names from a schema collection.
- * Returns the union of all relation field names that can be expanded.
- * @internal
- */
-export type ExpandableFields<
-    Schema extends SchemaDeclaration,
-    CollectionName extends keyof Schema
-> = ExtractRelations<Schema, CollectionName> extends never
-    ? never
-    : keyof ExtractRelations<Schema, CollectionName> & string;
 
 // ============================================================================
 // Expand Type Utilities
@@ -283,35 +194,6 @@ export type WithExpand<
     }
     : ExtractRecordType<Schema, CollectionName>;
 
-/**
- * Builds the expand object type based on an array of field names.
- * Used for query-time expand where fields are specified as an array.
- *
- * @example
- * ```ts
- * WithExpandFromArray<JobRecord, Schema, 'jobs', ['customer', 'address']> => JobRecord & {
- *     expand?: {
- *         customer?: CustomerRecord;
- *         address?: AddressRecord;
- *     }
- * }
- * ```
- * @internal
- */
-export type WithExpandFromArray<
-    T extends object,
-    Schema extends SchemaDeclaration,
-    CollectionName extends keyof Schema,
-    Fields extends readonly string[]
-> = T & {
-    expand?: {
-        [K in Fields[number]]: K extends keyof ExtractRelations<Schema, CollectionName>
-            ? ExtractRelations<Schema, CollectionName>[K] extends Array<infer U>
-                ? U[]  // Array relation
-                : ExtractRelations<Schema, CollectionName>[K]  // Single relation
-            : never;
-    };
-};
 
 // ============================================================================
 // Relation Type Utilities
@@ -322,16 +204,10 @@ export type WithExpandFromArray<
  * Used to unwrap optional relation types.
  *
  * @example
- * NonNullable<Customer | undefined> => Customer
+ * ExcludeUndefined<Customer | undefined> => Customer
  * @internal
  */
-export type NonNullable<T> = T extends (infer U) | undefined ? U : T;
-
-/**
- * Extracts the output type from a Collection type.
- * @internal
- */
-type ExtractCollectionOutput<C> = C extends Collection<infer TOutput, any, any, any, any> ? TOutput : never;
+export type ExcludeUndefined<T> = T extends (infer U) | undefined ? U : T;
 
 /**
  * Converts a schema relation type to its corresponding Collection constraint.
@@ -351,62 +227,62 @@ export type RelationAsCollection<T> =
         ? U extends object ? Collection<U, string | number, any, any, any> : Collection<object, string | number, any, any, any>
         : T extends object ? Collection<T, string | number, any, any, any> : Collection<object, string | number, any, any, any>;
 
+
 /**
- * Configuration for relations - maps field names to their TanStack DB collections.
- * Used to provide pre-configured collections for manual joins.
+ * Configuration for per-collection expand - maps relation field names to their target collections.
+ * Relations configured here are automatically expanded on every fetch and auto-upserted into target collections.
  *
  * @example
  * ```ts
- * const customersCollection = createCollection<Schema>(pb, queryClient)('customers');
- * const addressesCollection = createCollection<Schema>(pb, queryClient)('addresses');
- *
- * const jobsCollection = createCollection<Schema>(pb, queryClient)('jobs', {
- *     relations: {
- *         customer: customersCollection,
- *         address: addressesCollection
+ * const authorsCollection = createCollection<Schema>(pb, queryClient)('authors');
+ * const booksCollection = createCollection<Schema>(pb, queryClient)('books', {
+ *     expand: {
+ *         author: authorsCollection  // Always expand 'author', upsert into authorsCollection
  *     }
  * });
  * ```
  */
-export type RelationsConfig<
+export type ExpandConfig<
     Schema extends SchemaDeclaration,
     CollectionName extends keyof Schema
 > = ExtractRelations<Schema, CollectionName> extends never
     ? Record<string, never>
     : Partial<{
         [K in keyof ExtractRelations<Schema, CollectionName>]: RelationAsCollection<
-            NonNullable<ExtractRelations<Schema, CollectionName>[K]>
+            ExcludeUndefined<ExtractRelations<Schema, CollectionName>[K]>
         >;
     }>;
 
 /**
- * Configuration for expandable relations - maps relation field names to their target collections.
- * Used to define which relations CAN be expanded at query time with auto-insertion into target collections.
- *
- * @example
- * ```ts
- * const customersCollection = createCollection<Schema>(pb, queryClient)('customers');
- * const addressesCollection = createCollection<Schema>(pb, queryClient)('addresses');
- * const tagsCollection = createCollection<Schema>(pb, queryClient)('tags');
- *
- * const jobsCollection = createCollection<Schema>(pb, queryClient)('jobs', {
- *     expandable: {
- *         customer: customersCollection,
- *         address: addressesCollection,
- *         tags: tagsCollection
- *     }
- * });
- * ```
+ * Runtime representation of a collection that can receive upserted expand data.
+ * This is the minimal interface needed for the LoaderHost to insert expanded records.
+ * @internal
  */
-export type ExpandableConfig<
+export interface ExpandTargetCollection {
+    utils?: {
+        writeUpsert: (records: object[]) => void;
+    };
+    isReady: () => boolean;
+    _sync: {
+        startSync: () => Promise<void>;
+    };
+    config?: {
+        syncMode?: 'eager' | 'on-demand';
+    };
+}
+
+/**
+ * Maps expandable field names to their target collections for runtime use.
+ * Used by LoaderHost to insert expanded records into their respective collections.
+ * @internal
+ */
+export type ExpandableStoresConfig<
     Schema extends SchemaDeclaration,
     CollectionName extends keyof Schema
 > = ExtractRelations<Schema, CollectionName> extends never
     ? Record<string, never>
     : Partial<{
-        [K in keyof ExtractRelations<Schema, CollectionName>]: RelationAsCollection<
-            NonNullable<ExtractRelations<Schema, CollectionName>[K]>
-        >;
+        [K in keyof ExtractRelations<Schema, CollectionName>]: ExpandTargetCollection;
     }>;
 
 // ============================================================================
@@ -414,76 +290,33 @@ export type ExpandableConfig<
 // ============================================================================
 
 /**
- * Options for creating a collection with optional expandable and relations.
+ * Options for creating a collection.
  */
 export interface CreateCollectionOptions<
     Schema extends SchemaDeclaration,
     CollectionName extends keyof Schema
 > {
     /**
-     * Pre-configured relation collections for manual TanStack DB joins.
+     * Configure relations to automatically expand on every fetch.
+     * Maps relation field names to their target collections for auto-upsert.
+     *
+     * Expanded records are automatically inserted into their target collections.
      *
      * @example
      * ```ts
-     * const customersCollection = createCollection<Schema>(pb, queryClient)('customers');
-     * const addressesCollection = createCollection<Schema>(pb, queryClient)('addresses');
-     *
-     * const jobsCollection = createCollection<Schema>(pb, queryClient)('jobs', {
-     *     relations: {
-     *         customer: customersCollection,
-     *         address: addressesCollection
-     *     }
-     * });
-     * ```
-     */
-    relations?: RelationsConfig<Schema, CollectionName>;
-
-    /**
-     * Define which relations CAN be expanded at query time.
-     * Maps relation field names to their target collections for auto-insertion.
-     *
-     * When specified, enables the `.expand()` method on the collection that allows
-     * query-time selection of which relations to expand. Expanded records are
-     * automatically inserted into their target collections.
-     *
-     * @example
-     * ```ts
-     * const customersCollection = createCollection<Schema>(pb, queryClient)('customers');
-     * const addressesCollection = createCollection<Schema>(pb, queryClient)('addresses');
-     *
-     * const jobsCollection = createCollection<Schema>(pb, queryClient)('jobs', {
-     *     expandable: {
-     *         customer: customersCollection,
-     *         address: addressesCollection
+     * const authorsCollection = createCollection<Schema>(pb, queryClient)('authors');
+     * const booksCollection = createCollection<Schema>(pb, queryClient)('books', {
+     *     expand: {
+     *         author: authorsCollection  // Always expand, auto-upsert into authorsCollection
      *     }
      * });
      *
-     * // In query - choose which to expand
-     * const { data } = useLiveQuery((q) =>
-     *     q.from({ jobs: jobsCollection.expand('customer') })
-     * );
+     * // Expand is automatic - no .expand() call needed
+     * const { data } = useLiveQuery((q) => q.from({ books: booksCollection }));
+     * // data[0].expand.author is typed and populated
      * ```
      */
-    expandable?: ExpandableConfig<Schema, CollectionName>;
-
-    /**
-     * Whether to automatically sync (fetch) data when the collection is created.
-     * Default: false (lazy - sync starts after first query becomes active).
-     *
-     * @example
-     * ```ts
-     * // Lazy loading (default) - sync starts after query
-     * const jobsCollection = createCollection<Schema>(pb, queryClient)('jobs');
-     * // or explicitly:
-     * const jobsCollection = createCollection<Schema>(pb, queryClient)('jobs', { startSync: false });
-     *
-     * // Eager loading - sync starts immediately on creation
-     * const jobsCollection = createCollection<Schema>(pb, queryClient)('jobs', {
-     *     startSync: true
-     * });
-     * ```
-     */
-    startSync?: boolean;
+    expand?: ExpandConfig<Schema, CollectionName>;
 
     /**
      * Fields that can be omitted during insert operations.
@@ -513,7 +346,7 @@ export interface CreateCollectionOptions<
      * });
      * ```
      */
-    omitOnInsert?: readonly (Exclude<keyof ExtractRecordType<Schema, CollectionName>, 'id'>)[];
+    omitOnInsert?: readonly OmittableFields<ExtractRecordType<Schema, CollectionName>>[];
 
     /**
      * Custom handler for insert mutations.
@@ -616,24 +449,24 @@ export interface CreateCollectionOptions<
     /**
      * Sync mode for the collection. Controls when and how data is fetched from PocketBase.
      *
-     * - `'on-demand'` (default): Fetches data only when queries execute. Each query with different
+     * - `'eager'` (default): Fetches all data immediately when collection is created.
+     *   Queries are evaluated client-side against the cached data. Fast for small datasets
+     *   but loads entire collection into memory. Matches TanStack DB default.
+     *
+     * - `'on-demand'`: Fetches data only when queries execute. Each query with different
      *   filters/sorting triggers a new fetch from PocketBase. Enables true server-side
      *   filtering and is better for large datasets.
      *
-     * - `'eager'`: Fetches all data immediately when collection is created.
-     *   Queries are evaluated client-side against the cached data. Fast for small datasets
-     *   but loads entire collection into memory.
-     *
-     * @default 'on-demand'
+     * @default 'eager'
      *
      * @example
      * ```ts
-     * // Default: on-demand mode - server-side filtering
+     * // Default: eager mode - client-side filtering
      * const collection = createCollection<Schema>(pb, queryClient)('books');
      *
-     * // Eager mode - client-side filtering
+     * // On-demand mode - server-side filtering
      * const collection = createCollection<Schema>(pb, queryClient)('books', {
-     *     syncMode: 'eager'
+     *     syncMode: 'on-demand'
      * });
      * ```
      */

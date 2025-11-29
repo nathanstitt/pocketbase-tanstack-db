@@ -66,25 +66,6 @@ describe('Collection - Basic Operations', () => {
         expect(bookTitle).toBeTypeOf('string')
     })
 
-    it('should accept relations config for type safety', async () => {
-        const factory = createCollectionFactory(queryClient)
-
-        // Create collections with relations config
-        const authorsCollection = factory.create('authors')
-        const booksCollection = factory.create('books', {
-            relations: {
-                author: authorsCollection  // Type-checked field name
-            }
-        })
-
-        // Verify collections are created successfully
-        expect(booksCollection).toBeDefined()
-        expect(authorsCollection).toBeDefined()
-
-        // Note: Actual join logic would be in useLiveQuery as shown in JSDoc example
-        // This test validates that the API accepts relations configuration
-    })
-
     it('should fetch a single book using findOne with where clause', async () => {
         const booksCollection = createBooksCollection(queryClient)
 
@@ -158,48 +139,4 @@ describe('Collection - Basic Operations', () => {
         expect(result.current.data).toBeUndefined()
     }, 15000)
 
-    it('should fetch a single book using findOne by record ID', async () => {
-        const booksCollection = createBooksCollection(queryClient)
-
-        // Create a test book
-        const authorId = await getTestAuthorId()
-        const testBook = await pb.collection('books').create({
-            title: `FindOne Test ${Date.now().toString().slice(-8)}`,
-            genre: 'Fiction',
-            isbn: getTestSlug('fnd'),
-            author: authorId
-        })
-
-        // Use findOne to fetch the book by ID
-        const { result } = renderHook(() =>
-            useLiveQuery((q) =>
-                q.from({ books: booksCollection })
-                    .where(({ books }) => eq(books.id, testBook.id))
-                    .findOne()
-            )
-        )
-
-        // Wait for query to complete
-        await waitFor(
-            () => {
-                expect(result.current.isLoading).toBe(false)
-                expect(result.current.data).toBeDefined()
-            },
-            { timeout: 5000 }
-        )
-
-        // Verify findOne returns the correct single record
-        expect(result.current.data).toBeDefined()
-        expect(result.current.data).not.toBeInstanceOf(Array)
-        expect(result.current.data?.id).toBe(testBook.id)
-        expect(result.current.data?.title).toBe(testBook.title)
-        expect(result.current.data?.isbn).toBe(testBook.isbn)
-
-        // Cleanup
-        try {
-            await pb.collection('books').delete(testBook.id)
-        } catch (_error) {
-            // Ignore cleanup errors
-        }
-    }, 15000)
 })

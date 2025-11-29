@@ -92,7 +92,7 @@ describe('Collection Query Behavior', () => {
         const [page, perPage, options] = callWithFilter!
         expect(page).toBe(1)
         expect(perPage).toBe(500)  // Default limit
-        expect(options.filter).toBe(`genre = "${testGenre}"`)
+        expect(options?.filter).toBe(`genre = "${testGenre}"`)
 
         // Verify results are correctly filtered
         expect(result.current.data).toBeDefined()
@@ -141,7 +141,7 @@ describe('Collection Query Behavior', () => {
         const [page, perPage, options] = callWithSort!
         expect(page).toBe(1)
         expect(perPage).toBe(500)  // Default limit
-        expect(options.sort).toBe('-created')  // PocketBase uses '-' prefix for descending
+        expect(options?.sort).toBe('-created')  // PocketBase uses '-' prefix for descending
 
         // Verify results are correctly sorted
         expect(result.current.data).toBeDefined()

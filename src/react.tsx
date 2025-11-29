@@ -35,23 +35,23 @@ export interface ReactProviderResult<CollectionsMap> {
 }
 
 /**
- * Creates a React Provider and useStore hook from an existing collections map.
- * This function wraps collections created by createCollections() for React integration.
+ * Creates a React Provider and useStore hook from a collections map.
  *
- * @param collections - Map of collection keys to Collection instances (from createCollections)
+ * @param collections - Map of collection keys to Collection instances
  * @returns Object containing Provider component and useStore hook
  *
  * @example
  * Basic usage:
  * ```tsx
- * import { createCollections, createReactProvider } from 'pbtsdb';
+ * import { createCollection, createReactProvider } from 'pbtsdb';
  * import { useLiveQuery } from '@tanstack/react-db';
  *
- * // Step 1: Create collections (universal)
- * const collections = createCollections<Schema>(pb, queryClient)({
- *     books: {},
- *     authors: {}
- * });
+ * // Step 1: Create collections
+ * const c = createCollection<Schema>(pb, queryClient);
+ * const collections = {
+ *     books: c('books', {}),
+ *     authors: c('authors', {}),
+ * };
  *
  * // Step 2: Wrap for React
  * const { Provider, useStore } = createReactProvider(collections);
@@ -95,24 +95,21 @@ export interface ReactProviderResult<CollectionsMap> {
  * ```
  *
  * @example
- * With expandable collections:
+ * With auto-expand collections:
  * ```tsx
- * const collections = createCollections<Schema>(pb, queryClient)({
- *     authors: {},
- *     books: {
- *         expandable: {
- *             author: authorsCollection  // Pre-create authors first
- *         }
+ * const c = createCollection<Schema>(pb, queryClient);
+ * const authors = c('authors', {});
+ * const books = c('books', {
+ *     expand: {
+ *         author: authors
  *     }
  * });
  *
- * const { Provider, useStore } = createReactProvider(collections);
+ * const { Provider, useStore } = createReactProvider({ authors, books });
  *
  * function BooksWithExpandedAuthors() {
  *     const [books] = useStore('books');
- *     const booksWithAuthor = books.expand('author');
- *
- *     const { data } = useLiveQuery((q) => q.from({ books: booksWithAuthor }));
+ *     const { data } = useLiveQuery((q) => q.from({ books }));
  *
  *     return (
  *         <ul>

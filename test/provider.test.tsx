@@ -7,21 +7,34 @@ import type { QueryClient } from '@tanstack/react-query';
 import { createReactProvider } from '../src/react';
 import { createCollection } from '../src/collection';
 import type { Schema } from './schema';
-import { pb, createTestQueryClient, authenticateTestUser, clearAuth, getTestAuthorId } from './helpers';
+import {
+    pb,
+    createTestQueryClient,
+    authenticateTestUser,
+    clearAuth,
+    getTestAuthorId,
+    createTestLogger,
+    setLogger,
+    resetLogger,
+} from './helpers';
 
 describe('createReactProvider', () => {
     let queryClient: QueryClient;
+    const testLogger = createTestLogger();
 
     beforeAll(async () => {
         await authenticateTestUser();
+        setLogger(testLogger);
     });
 
     afterAll(() => {
         clearAuth();
+        resetLogger();
     });
 
     beforeEach(() => {
         queryClient = createTestQueryClient();
+        testLogger.clear();
     });
 
     afterEach(() => {
@@ -240,7 +253,7 @@ describe('createReactProvider', () => {
             expect(result.current[0]).toBeDefined();
         });
 
-        it('should support expandable collections within provider context', async () => {
+        it('should support auto-expand collections within provider context', async () => {
             const c = createCollection<Schema>(pb, queryClient);
             const authors = c('authors', {
                 syncMode: 'eager',
@@ -249,7 +262,7 @@ describe('createReactProvider', () => {
             const books = c('books', {
                 syncMode: 'eager',
                 omitOnInsert: ['created'],
-                expandable: {
+                expand: {
                     author: authors,
                 }
             });
@@ -262,9 +275,9 @@ describe('createReactProvider', () => {
             const authorId = await getTestAuthorId();
             const { result } = renderHook(
                 () => {
-                    const [books, _] = useStore('books', 'authors')
+                    const [booksCollection, _] = useStore('books', 'authors')
                     const booksQuery = useLiveQuery((q) =>
-                        q.from({ books: books.expand('author') })
+                        q.from({ books: booksCollection })
                             .where(({ books }) => eq(books.author, authorId))
                     );
                     const authorsQuery = useLiveQuery((q) => q.from({ authors }));

@@ -1,10 +1,10 @@
-import { renderHook, waitFor } from '@testing-library/react'
+import { renderHook } from '@testing-library/react'
 import { useLiveQuery } from '@tanstack/react-db'
 import { and, eq, gt, gte, lt, lte, or } from '@tanstack/db'
 import { afterAll, beforeAll, beforeEach, afterEach, describe, expect, it } from 'vitest'
 import type { QueryClient } from '@tanstack/react-query'
 
-import { pb, createTestQueryClient, authenticateTestUser, clearAuth, createBooksCollection, createCollectionFactory } from './helpers'
+import { pb, createTestQueryClient, authenticateTestUser, clearAuth, createBooksCollection, createCollectionFactory, waitForLoadFinish } from './helpers'
 
 describe('Collection - Query Operators', () => {
     let queryClient: QueryClient
@@ -40,13 +40,7 @@ describe('Collection - Query Operators', () => {
             )
         )
 
-        await waitFor(
-            () => {
-                expect(result.current.isLoading).toBe(false)
-            },
-            { timeout: 5000 }
-        )
-
+        await waitForLoadFinish(result)
         expect(result.current.data).toBeDefined()
         expect(result.current.data.length).toBeGreaterThan(0)
 
@@ -69,13 +63,7 @@ describe('Collection - Query Operators', () => {
             )
         )
 
-        await waitFor(
-            () => {
-                expect(result.current.isLoading).toBe(false)
-            },
-            { timeout: 5000 }
-        )
-
+        await waitForLoadFinish(result)
         expect(result.current.data).toBeDefined()
         expect(result.current.data.length).toBeGreaterThan(0)
 
@@ -100,13 +88,7 @@ describe('Collection - Query Operators', () => {
             )
         )
 
-        await waitFor(
-            () => {
-                expect(result.current.isLoading).toBe(false)
-            },
-            { timeout: 5000 }
-        )
-
+        await waitForLoadFinish(result)
         expect(result.current.data).toBeDefined()
         expect(result.current.data.length).toBeGreaterThan(0)
 
@@ -129,13 +111,7 @@ describe('Collection - Query Operators', () => {
             )
         )
 
-        await waitFor(
-            () => {
-                expect(result.current.isLoading).toBe(false)
-            },
-            { timeout: 5000 }
-        )
-
+        await waitForLoadFinish(result)
         expect(result.current.data).toBeDefined()
         expect(result.current.data.length).toBeGreaterThan(0)
 
@@ -157,13 +133,7 @@ describe('Collection - Query Operators', () => {
             )
         )
 
-        await waitFor(
-            () => {
-                expect(result.current.isLoading).toBe(false)
-            },
-            { timeout: 5000 }
-        )
-
+        await waitForLoadFinish(result)
         expect(result.current.data).toBeDefined()
         expect(result.current.data.length).toBeGreaterThan(0)
 
@@ -192,13 +162,7 @@ describe('Collection - Query Operators', () => {
             )
         )
 
-        await waitFor(
-            () => {
-                expect(result.current.isLoading).toBe(false)
-            },
-            { timeout: 5000 }
-        )
-
+        await waitForLoadFinish(result)
         expect(result.current.data).toBeDefined()
 
         // All results should match both conditions
@@ -230,13 +194,7 @@ describe('Collection - Query Operators', () => {
             )
         )
 
-        await waitFor(
-            () => {
-                expect(result.current.isLoading).toBe(false)
-            },
-            { timeout: 5000 }
-        )
-
+        await waitForLoadFinish(result)
         expect(result.current.data).toBeDefined()
         expect(result.current.data.length).toBeGreaterThan(0)
 
@@ -256,13 +214,7 @@ describe('Collection - Query Operators', () => {
             )
         )
 
-        await waitFor(
-            () => {
-                expect(result.current.isLoading).toBe(false)
-            },
-            { timeout: 5000 }
-        )
-
+        await waitForLoadFinish(result)
         expect(result.current.data).toBeDefined()
         expect(result.current.data.length).toBeGreaterThanOrEqual(1)
 
@@ -297,13 +249,7 @@ describe('Collection - Query Operators', () => {
             )
         )
 
-        await waitFor(
-            () => {
-                expect(result.current.isLoading).toBe(false)
-            },
-            { timeout: 5000 }
-        )
-
+        await waitForLoadFinish(result)
         expect(result.current.data).toBeDefined()
 
         // All results should match the complex condition

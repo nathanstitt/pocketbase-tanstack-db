@@ -218,10 +218,10 @@ const [jobs, customers] = useStore('jobs', 'customers');
 
 ### When NOT to Use
 
-- Non-React environments (use PocketBase SDK directly)
 - Simple CRUD without real-time (PocketBase SDK is simpler)
 - Very large collections (>10k records - use pagination)
 - Non-PocketBase backends (use TanStack Query directly)
+- Server-side only Node.js (use PocketBase SDK directly)
 
 ### Package Details
 

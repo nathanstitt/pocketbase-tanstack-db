@@ -45,6 +45,8 @@ npm install pbtsdb pocketbase @tanstack/react-query @tanstack/react-db @tanstack
 - `react` >= 18.0.0
 - `react-dom` >= 18.0.0
 
+All peer dependencies use minimum version constraints - newer versions should work.
+
 ## Quick Start
 
 Let's build a **real-world blog** with posts, authors, and comments using pbtsdb.
@@ -87,7 +89,7 @@ interface Comment {
 type BlogSchema = {
     posts: {
         type: Post;
-        relations: { author: User };
+        relations: { author?: User };
     };
     users: {
         type: User;
@@ -96,8 +98,8 @@ type BlogSchema = {
     comments: {
         type: Comment;
         relations: {
-            post: Post;
-            author: User;
+            post?: Post;
+            author?: User;
         };
     };
 }
@@ -231,8 +233,9 @@ export function PostWithComments({ postId }: { postId: string }) {
 Collections are reactive data stores that automatically sync with PocketBase:
 
 ```typescript
-// Create a collection
-const booksCollection = factory.create('books');
+// Create a collection using the curried API
+const c = createCollection<MySchema>(pb, queryClient);
+const booksCollection = c('books', {});
 
 // Collections automatically:
 // - Fetch data from PocketBase
@@ -247,21 +250,22 @@ Collections manage subscriptions **automatically** based on query lifecycle:
 
 ```typescript
 // Collections are lazy - no subscription until queried
-const booksCollection = factory.create('books');
+const c = createCollection<MySchema>(pb, queryClient);
+const booksCollection = c('books', {});
 
 // Subscription starts automatically when query becomes active
 const { data } = useLiveQuery((q) =>
     q.from({ books: booksCollection })
 );
 // ✅ Subscribed to changes while component is mounted
-// ✅ Unsubscribes automatically when component unmounts (with 5s cleanup delay)
-
-// Advanced: Manual subscription control
-await booksCollection.subscribe(); // Subscribe to all
-await booksCollection.subscribe('record_id'); // Subscribe to specific record
-booksCollection.unsubscribe('record_id'); // Unsubscribe from specific record
-booksCollection.unsubscribeAll(); // Clear all subscriptions
+// ✅ Unsubscribes automatically when component unmounts
 ```
+
+**Subscription Lifecycle:**
+- **Lazy:** No subscription starts until the first `useLiveQuery` using the collection renders
+- **Automatic:** Subscription starts when first subscriber mounts, stops when last subscriber unmounts
+- **Shared:** Multiple components using the same collection share one subscription
+- **No manual control needed:** The collection handles all subscription management internally
 
 ### Type Safety
 
@@ -422,50 +426,26 @@ function BooksWithAuthors() {
 
 ### Subscriptions
 
-Collections support real-time subscriptions to PocketBase.
+Collections manage real-time subscriptions to PocketBase **automatically**. No manual subscription management is needed for normal usage.
 
-#### subscribe()
-
-Subscribe to collection changes.
+#### Automatic Subscription Lifecycle
 
 ```typescript
-// Subscribe to all records
-await collection.subscribe();
-
-// Subscribe to specific record
-await collection.subscribe('record_id');
-```
-
-#### unsubscribe()
-
-Unsubscribe from changes.
-
-```typescript
-// Unsubscribe from all
-collection.unsubscribe();
-
-// Unsubscribe from specific record
-collection.unsubscribe('record_id');
-```
-
-#### unsubscribeAll()
-
-Clear all subscriptions for a collection.
-
-```typescript
-collection.unsubscribeAll();
+// Subscriptions start automatically when useLiveQuery renders
+function MyComponent() {
+    const [books] = useStore('books');
+    const { data } = useLiveQuery((q) => q.from({ books }));
+    // ✅ Subscription active while this component is mounted
+    // ✅ Automatically stops when component unmounts
+}
 ```
 
 #### isSubscribed()
 
-Check subscription status.
+Check if a collection has an active subscription.
 
 ```typescript
-// Check collection-wide subscription
 const isSubbed = collection.isSubscribed(); // boolean
-
-// Check specific record subscription
-const isRecordSubbed = collection.isSubscribed('record_id'); // boolean
 ```
 
 #### waitForSubscription()
@@ -473,9 +453,8 @@ const isRecordSubbed = collection.isSubscribed('record_id'); // boolean
 Wait for subscription to be established (useful in tests).
 
 ```typescript
-await collection.waitForSubscription(); // Wait for collection-wide
-await collection.waitForSubscription('record_id'); // Wait for specific record
-await collection.waitForSubscription(undefined, 5000); // With timeout
+await collection.waitForSubscription(); // Wait with default 5s timeout
+await collection.waitForSubscription(10000); // Wait with custom timeout (ms)
 ```
 
 ### Utility Functions
@@ -958,7 +937,7 @@ resetLogger();
 
 ## License
 
-ISC
+MIT
 
 ## Contributing
 

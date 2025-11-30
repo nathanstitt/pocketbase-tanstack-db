@@ -14,18 +14,13 @@ export {
     type ReactProviderResult,
 } from './react.js';
 
-export { SubscriptionManager, SUBSCRIPTION_CONFIG } from './subscription-manager';
-
 export { setLogger, resetLogger, type Logger } from './logger';
 
 export { newRecordId } from './util';
 
 export type {
     SchemaDeclaration,
-    SubscribableCollection,
     CreateCollectionOptions,
-    RealtimeEvent,
-    SubscriptionState,
     WithExpand,
     ExtractRecordType,
     ExtractRelations,

@@ -1,4 +1,4 @@
-import { renderHook, waitFor } from '@testing-library/react'
+import { renderHook } from '@testing-library/react'
 import { useLiveQuery } from '@tanstack/react-db'
 import { eq } from '@tanstack/db'
 import { afterAll, beforeAll, beforeEach, afterEach, describe, expect, it } from 'vitest'
@@ -14,6 +14,7 @@ import {
     createTestLogger,
     setLogger,
     resetLogger,
+    waitForLoadFinish,
 } from './helpers'
 import type { Schema } from './schema'
 
@@ -64,15 +65,7 @@ describe('Collection - Relations', () => {
             )
         )
 
-        // Wait for the query to load
-        await waitFor(
-            () => {
-                expect(result.current.isLoading).toBe(false)
-            },
-            { timeout: 10000 }
-        )
-
-        expect(result.current.isLoading).toBe(false)
+        await waitForLoadFinish(result, 10000)
         expect(result.current.data).toBeDefined()
         expect(result.current.data.length).toBeGreaterThanOrEqual(1)
 
@@ -118,13 +111,7 @@ describe('Collection - Relations', () => {
             )
         )
 
-        await waitFor(
-            () => {
-                expect(result.current.isLoading).toBe(false)
-            },
-            { timeout: 5000 }
-        )
-
+        await waitForLoadFinish(result)
         expect(result.current.data).toBeDefined()
         expect(result.current.data.length).toBeGreaterThan(0)
 
@@ -169,13 +156,7 @@ describe('Collection - Relations', () => {
             )
         )
 
-        await waitFor(
-            () => {
-                expect(result.current.isLoading).toBe(false)
-            },
-            { timeout: 5000 }
-        )
-
+        await waitForLoadFinish(result)
         expect(result.current.data).toBeDefined()
         expect(result.current.data.length).toBeGreaterThan(0)
 
@@ -201,13 +182,7 @@ describe('Collection - Relations', () => {
             )
         )
 
-        await waitFor(
-            () => {
-                expect(result.current.isLoading).toBe(false)
-            },
-            { timeout: 5000 }
-        )
-
+        await waitForLoadFinish(result)
         expect(result.current.data).toBeDefined()
         expect(result.current.data.length).toBeGreaterThan(0)
 
@@ -245,13 +220,7 @@ describe('Collection - Relations', () => {
             )
         )
 
-        await waitFor(
-            () => {
-                expect(result.current.isLoading).toBe(false)
-            },
-            { timeout: 5000 }
-        )
-
+        await waitForLoadFinish(result)
         expect(result.current.data).toBeDefined()
         expect(result.current.data.length).toBeGreaterThan(0)
 

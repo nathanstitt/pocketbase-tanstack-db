@@ -14,6 +14,7 @@ import {
     createTestLogger,
     setLogger,
     resetLogger,
+    waitForLoadFinish,
 } from './helpers';
 
 describe('Per-Collection Expand Feature', () => {
@@ -114,12 +115,7 @@ describe('Per-Collection Expand Feature', () => {
                 { wrapper: ({ children }) => <>{children}</> }
             );
 
-            await waitFor(
-                () => {
-                    expect(result.current.isLoading).toBe(false);
-                },
-                { timeout: 10000 }
-            );
+            await waitForLoadFinish(result, 10000);
 
             const books = result.current.data;
             if (books && books[0]) {
@@ -140,12 +136,7 @@ describe('Per-Collection Expand Feature', () => {
                 { wrapper: ({ children }) => <>{children}</> }
             );
 
-            await waitFor(
-                () => {
-                    expect(result.current.isLoading).toBe(false);
-                },
-                { timeout: 10000 }
-            );
+            await waitForLoadFinish(result, 10000);
 
             const books = result.current.data;
             expect(books).toBeDefined();
@@ -181,12 +172,7 @@ describe('Per-Collection Expand Feature', () => {
                 { wrapper: ({ children }) => <Provider>{children}</Provider> }
             );
 
-            await waitFor(
-                () => {
-                    expect(result.current.isLoading).toBe(false);
-                },
-                { timeout: 10000 }
-            );
+            await waitForLoadFinish(result, 10000);
 
             const booksData = result.current.data;
             expect(booksData).toBeDefined();

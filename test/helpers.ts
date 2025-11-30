@@ -1,4 +1,6 @@
 import { QueryClient } from '@tanstack/react-query'
+import { waitFor } from '@testing-library/react'
+import { expect } from 'vitest'
 import PocketBase from 'pocketbase'
 import type { Collection } from '@tanstack/db'
 import 'dotenv/config'
@@ -167,4 +169,42 @@ export async function getTestAuthorId(): Promise<string> {
         throw new Error('No authors found in database for testing')
     }
     return authors.items[0].id
+}
+
+/**
+ * Wait for a live query result to finish loading.
+ * @param result - The result object from renderHook containing { current: { isLoading: boolean } }
+ * @param timeout - Optional timeout in ms (default: 5000)
+ */
+export async function waitForLoadFinish(
+    result: { current: { isLoading: boolean } },
+    timeout = 5000
+): Promise<void> {
+    await waitFor(
+        () => {
+            expect(result.current.isLoading).toBe(false)
+        },
+        { timeout }
+    )
+}
+
+/**
+ * Collection type with subscription helpers exposed for testing.
+ */
+interface CollectionWithSubscription {
+    waitForSubscription: (timeout?: number) => Promise<void>;
+    isSubscribed: () => boolean;
+}
+
+/**
+ * Wait for a collection's real-time subscription to be established.
+ * Use this instead of arbitrary setTimeout delays in tests.
+ * @param collection - The collection to wait for subscription on
+ * @param timeout - Optional timeout in ms (default: 5000)
+ */
+export async function waitForSubscription(
+    collection: CollectionWithSubscription,
+    timeout = 5000
+): Promise<void> {
+    await collection.waitForSubscription(timeout);
 }

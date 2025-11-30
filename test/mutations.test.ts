@@ -12,6 +12,7 @@ import {
     getTestAuthorId,
     createCollectionFactory,
     newRecordId,
+    waitForLoadFinish,
 } from './helpers'
 import type { Books } from './schema'
 
@@ -42,13 +43,7 @@ describe('Collection - Mutations', () => {
 
         const { result } = renderHook(() => useLiveQuery((q) => q.from({ books: collection })))
 
-        await waitFor(
-            () => {
-                expect(result.current.isLoading).toBe(false)
-            },
-            { timeout: 5000 }
-        )
-
+        await waitForLoadFinish(result)
         const initialCount = result.current.data.length
 
         const authorId = await getTestAuthorId()
@@ -89,21 +84,16 @@ describe('Collection - Mutations', () => {
 
         const { result } = renderHook(() => useLiveQuery((q) => q.from({ books: collection })))
 
-        await waitFor(
-            () => {
-                expect(result.current.isLoading).toBe(false)
-                expect(result.current.data.length).toBeGreaterThan(0)
-            },
-            { timeout: 10000 }
-        )
+        await waitForLoadFinish(result, 10000)
+        expect(result.current.data.length).toBeGreaterThan(0)
 
         // Get an existing book from the collection
         const existingBook = result.current.data[0]
-        const originalTitle = existingBook.title
-        const updatedTitle = `Updated via Mutation ${Date.now().toString().slice(-8)}`
+        const originalPageCount = existingBook.page_count
+        const updatedPageCount = originalPageCount + 1
 
         const tx = collection.update(existingBook.id, (draft) => {
-            draft.title = updatedTitle
+            draft.page_count = updatedPageCount
         })
 
         expect(['pending', 'persisting']).toContain(tx.state)
@@ -114,10 +104,10 @@ describe('Collection - Mutations', () => {
 
         // Verify in PocketBase
         const serverBook = await pb.collection('books').getOne(existingBook.id)
-        expect(serverBook.title).toBe(updatedTitle)
+        expect(serverBook.page_count).toBe(updatedPageCount)
 
-        // Restore original title
-        await pb.collection('books').update(existingBook.id, { title: originalTitle })
+        // Restore original page count
+        await pb.collection('books').update(existingBook.id, { page_count: originalPageCount })
     }, 15000)
 
     it('should handle insert and delete in same batch (optimistic cancellation)', async () => {
@@ -131,13 +121,7 @@ describe('Collection - Mutations', () => {
 
         const { result } = renderHook(() => useLiveQuery((q) => q.from({ books: collection })))
 
-        await waitFor(
-            () => {
-                expect(result.current.isLoading).toBe(false)
-            },
-            { timeout: 5000 }
-        )
-
+        await waitForLoadFinish(result)
         const initialCount = result.current.data.length
 
         const authorId = await getTestAuthorId()

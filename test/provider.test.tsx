@@ -16,6 +16,7 @@ import {
     createTestLogger,
     setLogger,
     resetLogger,
+    waitForLoadFinish,
 } from './helpers';
 
 describe('createReactProvider', () => {
@@ -83,7 +84,7 @@ describe('createReactProvider', () => {
             expect(result.current).toBeDefined();
             expect(Array.isArray(result.current)).toBe(true);
             expect(result.current).toHaveLength(1);
-            expect(result.current[0]).toHaveProperty('subscribe');
+            expect(result.current[0]).toHaveProperty('collectionName');
             expect(result.current[0]).toHaveProperty('utils');
         });
 
@@ -105,13 +106,7 @@ describe('createReactProvider', () => {
                 { wrapper: ({ children }) => <Provider>{children}</Provider> }
             );
 
-            await waitFor(
-                () => {
-                    expect(result.current.isLoading).toBe(false);
-                },
-                { timeout: 10000 }
-            );
-
+            await waitForLoadFinish(result, 10000);
             expect(result.current.data).toBeDefined();
             expect(Array.isArray(result.current.data)).toBe(true);
             expect(result.current.data.length).toBeGreaterThanOrEqual(1)
@@ -166,9 +161,9 @@ describe('createReactProvider', () => {
             expect(result.current[0]).toBeDefined();
             expect(result.current[1]).toBeDefined();
             expect(result.current[2]).toBeDefined();
-            expect(result.current[0]).toHaveProperty('subscribe');
-            expect(result.current[1]).toHaveProperty('subscribe');
-            expect(result.current[2]).toHaveProperty('subscribe');
+            expect(result.current[0]).toHaveProperty('collectionName');
+            expect(result.current[1]).toHaveProperty('collectionName');
+            expect(result.current[2]).toHaveProperty('collectionName');
         });
 
         it('should allow using collections in useLiveQuery with joins', async () => {
@@ -187,13 +182,7 @@ describe('createReactProvider', () => {
                 { wrapper: ({ children }) => <Provider>{children}</Provider> }
             );
 
-            await waitFor(
-                () => {
-                    expect(result.current.isLoading).toBe(false);
-                },
-                { timeout: 10000 }
-            );
-
+            await waitForLoadFinish(result, 10000);
             expect(result.current.data).toBeDefined();
             expect(Array.isArray(result.current.data)).toBe(true);
         }, 15000);
@@ -234,7 +223,7 @@ describe('createReactProvider', () => {
             });
 
             expect(result.current).toBeDefined();
-            expect(result.current[0]).toHaveProperty('subscribe');
+            expect(result.current[0]).toHaveProperty('collectionName');
             expect(result.current[0]).toHaveProperty('utils');
         });
 

@@ -1,4 +1,4 @@
-import { renderHook, waitFor } from '@testing-library/react'
+import { renderHook } from '@testing-library/react'
 import { useLiveQuery } from '@tanstack/react-db'
 import { eq } from '@tanstack/db'
 import { afterAll, beforeAll, beforeEach, afterEach, describe, expect, it } from 'vitest'
@@ -10,9 +10,7 @@ import {
     authenticateTestUser,
     clearAuth,
     createBooksCollection,
-    createCollectionFactory,
-    getTestAuthorId,
-    getTestSlug
+    waitForLoadFinish,
 } from './helpers'
 
 describe('Collection - Basic Operations', () => {
@@ -50,15 +48,7 @@ describe('Collection - Basic Operations', () => {
             )
         )
 
-        // Wait for the collection to load and have data
-        await waitFor(
-            () => {
-                expect(result.current.isLoading).toBe(false)
-            },
-            { timeout: 5000 }
-        )
-
-        expect(result.current.isLoading).toBe(false)
+        await waitForLoadFinish(result)
         expect(result.current.data).toBeDefined()
         expect(result.current.data.length).toBeGreaterThanOrEqual(1)
         const book = result.current.data[0]
@@ -76,14 +66,8 @@ describe('Collection - Basic Operations', () => {
             )
         )
 
-        // Wait for initial data load
-        await waitFor(
-            () => {
-                expect(listResult.current.isLoading).toBe(false)
-                expect(listResult.current.data.length).toBeGreaterThan(0)
-            },
-            { timeout: 5000 }
-        )
+        await waitForLoadFinish(listResult)
+        expect(listResult.current.data.length).toBeGreaterThan(0)
 
         const targetBook = listResult.current.data[0]
         const targetIsbn = targetBook.isbn
@@ -97,13 +81,7 @@ describe('Collection - Basic Operations', () => {
             )
         )
 
-        // Wait for findOne query to complete
-        await waitFor(
-            () => {
-                expect(findOneResult.current.isLoading).toBe(false)
-            },
-            { timeout: 5000 }
-        )
+        await waitForLoadFinish(findOneResult)
 
         // Verify findOne returns a single object, not an array
         expect(findOneResult.current.data).toBeDefined()
@@ -127,13 +105,7 @@ describe('Collection - Basic Operations', () => {
             )
         )
 
-        // Wait for query to complete
-        await waitFor(
-            () => {
-                expect(result.current.isLoading).toBe(false)
-            },
-            { timeout: 5000 }
-        )
+        await waitForLoadFinish(result)
 
         // Verify findOne returns undefined when no match
         expect(result.current.data).toBeUndefined()

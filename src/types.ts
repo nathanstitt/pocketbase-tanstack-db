@@ -1,5 +1,4 @@
 import type { Collection, InsertMutationFn, UpdateMutationFn, DeleteMutationFn } from "@tanstack/db"
-import type { UnsubscribeFunc } from 'pocketbase';
 
 // ============================================================================
 // Schema Type Definitions
@@ -36,66 +35,6 @@ export interface SchemaDeclaration {
             [fieldName: string]: BaseRecord | BaseRecord[];
         };
     };
-}
-
-// ============================================================================
-// Subscription Types
-// ============================================================================
-
-/**
- * PocketBase real-time event structure.
- * Matches RecordSubscription from the PocketBase SDK.
- */
-export interface RealtimeEvent<T extends object = object> {
-    action: string;
-    record: T;
-}
-
-/**
- * Internal state tracking for subscription management.
- * Includes reconnection logic and record-specific subscriptions.
- */
-export interface SubscriptionState {
-    unsubscribe: UnsubscribeFunc;
-    recordId?: string;
-    reconnectAttempts: number;
-    isReconnecting: boolean;
-}
-
-/**
- * Enhanced collection interface with subscription management capabilities.
- * Provides methods to control real-time updates from PocketBase.
- */
-export interface SubscribableCollection<T extends object = object> {
-    /**
-     * Subscribe to real-time updates for this collection.
-     * @param recordId - Optional: Subscribe to a specific record, or omit for collection-wide updates
-     */
-    subscribe: (recordId?: string) => Promise<void>;
-
-    /**
-     * Unsubscribe from real-time updates.
-     * @param recordId - Optional: Unsubscribe from a specific record, or omit for collection-wide
-     */
-    unsubscribe: (recordId?: string) => void;
-
-    /**
-     * Unsubscribe from all subscriptions for this collection.
-     */
-    unsubscribeAll: () => void;
-
-    /**
-     * Check if currently subscribed to updates.
-     * @param recordId - Optional: Check a specific record subscription, or omit for collection-wide
-     */
-    isSubscribed: (recordId?: string) => boolean;
-
-    /**
-     * Wait for a subscription to be fully established (useful for testing).
-     * @param recordId - Optional record ID
-     * @param timeoutMs - Timeout in milliseconds (default: 5000)
-     */
-    waitForSubscription: (recordId?: string, timeoutMs?: number) => Promise<void>;
 }
 
 // ============================================================================

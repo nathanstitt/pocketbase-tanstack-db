@@ -79,7 +79,7 @@ This library may NOT be suitable if:
 
 ## Core Technologies
 
-### PocketBase (v0.26.3)
+### PocketBase (>= 0.21.0)
 - Backend-as-a-service platform providing database, authentication, and real-time subscriptions
 - Collections-based data model (similar to tables in traditional databases)
 - Built-in authentication and authorization
@@ -93,7 +93,7 @@ This library may NOT be suitable if:
 - **Expand:** Query parameter to populate related records (similar to SQL joins)
 - **Auth:** Built-in user authentication with collection-based user management
 
-### TanStack Query (v5.90.10)
+### TanStack Query (>= 5.0.0)
 - Powerful data fetching and state management library
 - Handles caching, background updates, and stale data
 - **Documentation:** https://tanstack.com/query/latest
@@ -104,7 +104,7 @@ This library may NOT be suitable if:
 - **Stale-While-Revalidate:** Serve cached data while fetching fresh data in background
 - **Automatic Refetching:** Configurable refetch on window focus, reconnect, etc.
 
-### TanStack DB (v0.1.49) & Query DB Collection (v1.0.4)
+### TanStack DB (>= 0.1.0) & Query DB Collection (>= 1.0.0)
 - Client-side reactive database built on TanStack Query
 - Provides collections with automatic reactivity
 - **Documentation:** https://tanstack.com/db/latest
@@ -181,7 +181,7 @@ const c2 = createCollection<Schema>(pb, queryClient);  // Wasteful!
 const customers = c2('customers', {});
 ```
 
-**Why?** Each createCollection call creates its own subscription manager. Multiple instances create duplicate SSE connections to the same PocketBase server, wasting resources and causing race conditions.
+**Why?** Each createCollection call manages its own real-time subscription. Multiple collections from different `createCollection` calls pointing to the same PocketBase collection would create duplicate SSE connections, wasting resources.
 
 ### Type Safety Requirements
 
@@ -428,8 +428,14 @@ const customerName: string | undefined = data[0]?.expand?.customer?.name;  // âœ
 1. **Default to Type-Safe Expand:**
    ```typescript
    // âœ… GOOD: Simple, fast, type-safe
-   const jobs = collections.create('jobs', {
-       expand: 'customer,address' as const
+   const c = createCollection<Schema>(pb, queryClient);
+   const customers = c('customers', {});
+   const addresses = c('addresses', {});
+   const jobs = c('jobs', {
+       expand: {
+           customer: customers,
+           address: addresses
+       }
    });
    ```
 
@@ -444,13 +450,19 @@ const customerName: string | undefined = data[0]?.expand?.customer?.name;  // âœ
        )
    ```
 
-3. **Use `as const` for Expand Strings:**
+3. **Expand Config Uses Collection References:**
    ```typescript
-   // âœ… GOOD: Enables proper type inference
-   const jobs = collections.create('jobs', {
-       expand: 'customer,address' as const
+   // âœ… GOOD: Type-safe expand via collection references
+   const c = createCollection<Schema>(pb, queryClient);
+   const customers = c('customers', {});
+   const addresses = c('addresses', {});
+   const jobs = c('jobs', {
+       expand: {
+           customer: customers,  // Maps relation field to target collection
+           address: addresses
+       }
    });
-   // TypeScript now knows: data[0].expand.customer and data[0].expand.address exist
+   // TypeScript knows: data[0].expand.customer and data[0].expand.address exist
    // Provides autocomplete for expanded fields
    // Type errors if you access data[0].expand.invalid_field
 
@@ -460,9 +472,6 @@ const customerName: string | undefined = data[0]?.expand?.customer?.name;  // âœ
        const name = data[0].expand.customer.name;  // âœ… TypeScript knows this exists
        const city = data[0].expand.address.city;   // âœ… Fully type-safe
    }
-
-   // Note: The expand option takes a map of field names to their target collections,
-   // which provides full type safety automatically.
    ```
 
 ### Working with Collections
@@ -809,19 +818,10 @@ try {
 
 **3. Subscription Errors:**
 ```typescript
-// SSE connection failures are handled automatically
-// Subscriptions auto-retry with exponential backoff
-// To check if subscription failed:
-const isSubscribed = jobsCollection.isSubscribed();
-
-if (!isSubscribed) {
-    // Subscription not active - data won't update in real-time
-    // Queries still work (non-reactive fallback)
-    // Manual retry if needed:
-    await jobsCollection.subscribe().catch(err => {
-        console.error('Failed to subscribe:', err);
-    });
-}
+// SSE connection failures are handled automatically by the collection
+// Subscriptions start when useLiveQuery is active, stop when unmounted
+// If subscription fails, errors are logged and data still loads (without real-time updates)
+// No manual intervention is needed - the collection manages its own subscription lifecycle
 ```
 
 **4. Validation Errors:**
@@ -885,75 +885,36 @@ PocketBase supports real-time updates via SSE, which pbtsdb automatically manage
 const { data } = useLiveQuery((q) =>
   q.from({ jobs: jobsCollection })
 );
-// Subscription starts automatically when query becomes active
-// Subscription stops automatically when component unmounts (with cleanup delay)
+// Subscription starts automatically when first query becomes active
+// Subscription stops automatically when all queries using the collection unmount
 ```
 
-**Manual subscription control** (advanced use cases):
-```typescript
-// Manually subscribe to all changes
-await jobsCollection.subscribe();
-
-// Subscribe to specific record
-await jobsCollection.subscribe('record_id_123');
-
-// Check subscription status
-const isSubscribed = jobsCollection.isSubscribed();
-
-// Manually unsubscribe
-jobsCollection.unsubscribe('record_id_123');
-jobsCollection.unsubscribeAll();
-```
-
-**Subscription Lifecycle (Detailed):**
+**Subscription Lifecycle:**
 
 **1. Lazy Initialization:**
-- Collections created with `factory.create()` do NOT start subscriptions immediately
-- For 'on-demand' collections, no network activity occurs until the first React component calls `useLiveQuery` with the collection
+- Collections do NOT start subscriptions immediately on creation
+- No network activity occurs until the first `useLiveQuery` using the collection renders
 
 **2. Automatic Start:**
-- When the FIRST React component renders with `useLiveQuery` using a collection
+- When the FIRST `useLiveQuery` renders with a collection, the subscription starts
 - The collection connects to PocketBase via Server-Sent Events (SSE)
-- On success: Real-time updates begin flowing to the collection
-- On failure: Error is logged, and the system retries connection with exponential backoff (1s, 2s, 4s, up to 5 attempts)
+- On success: Real-time updates (create/update/delete) flow to the collection automatically
+- On failure: Error is logged, queries still work (without real-time updates)
 
-**3. Shared Subscriptions (Efficiency):**
+**3. Shared Subscriptions:**
 - Multiple `useLiveQuery` calls share ONE subscription per collection
-- Subscription remains active while ANY component uses it
-- No duplicate connections are created
+- Subscription remains active while ANY component uses the collection
+- No duplicate SSE connections are created
 
-**4. Automatic Stop with Delayed Cleanup:**
-- When the LAST component unmounts (no more active `useLiveQuery` subscribers)
-- System waits 5 seconds before disconnecting (prevents reconnection thrashing)
-- If a new subscriber appears within 5 seconds, the connection stays alive
-- After 5 seconds with zero subscribers: SSE connection closes automatically
+**4. Automatic Stop:**
+- When the LAST component using `useLiveQuery` with the collection unmounts
+- The SSE connection closes immediately
+- If a new component subscribes, a fresh connection is established
 
-**5. Checking Subscription Status:**
-```typescript
-// Check if collection is currently subscribed
-const isLive = jobsCollection.isSubscribed();
-
-// Wait for subscription to be ready (useful for tests)
-await jobsCollection.waitForSubscription(undefined, 5000); // 5s timeout
-```
-
-**6. Error Handling:**
-- Subscription failures are logged automatically
-- Reconnection attempts use exponential backoff (configurable in `SUBSCRIPTION_CONFIG`)
-- After max attempts (default: 5), subscription stops trying but queries still work (non-reactive)
-- To force reconnect: Call `collection.subscribe()` manually
-
-**7. Manual Override (Advanced Use Cases):**
-```typescript
-// Force subscription (bypasses automatic lifecycle)
-await jobsCollection.subscribe();
-
-// Force subscribe to specific record only
-await jobsCollection.subscribe('record_id_123');
-
-// Must manually cleanup if you manually subscribe
-jobsCollection.unsubscribeAll();
-```
+**5. No Manual Control Needed:**
+- Subscription lifecycle is fully automatic
+- No manual `subscribe()`, `unsubscribe()`, or `isSubscribed()` methods
+- The collection handles all real-time updates transparently
 
 ## TanStack DB Integration Details
 
@@ -1027,13 +988,13 @@ interface NewCollectionRecord {
 
 2. **Add to schema declaration**:
 ```typescript
-interface Schema extends SchemaDeclaration {
+export type Schema = {
+    // ... existing collections ...
     new_collection: {
-        Row: NewCollectionRecord;
-        Relations: {
-            forward: {
-                // Add any relations here
-            };
+        type: NewCollectionRecord;
+        relations: {
+            // Add any relations here (optional fields)
+            related_field?: RelatedRecord;
         };
     };
 }

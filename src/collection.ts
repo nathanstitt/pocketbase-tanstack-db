@@ -1,12 +1,11 @@
 import PocketBase from 'pocketbase';
+import type { RecordSubscription } from 'pocketbase';
 import { createCollection as createTanStackCollection, type Collection, type LoadSubsetOptions } from "@tanstack/react-db"
-import { queryCollectionOptions } from "@tanstack/query-db-collection"
+import { queryCollectionOptions, type QueryCollectionUtils } from "@tanstack/query-db-collection"
 import { QueryClient } from '@tanstack/react-query'
-import { SubscriptionManager } from './subscription-manager';
 import { convertToPocketBaseFilter, convertToPocketBaseSort } from './pocketbase-query-converter';
 import type {
     SchemaDeclaration,
-    SubscribableCollection,
     CreateCollectionOptions,
     ExtractRecordType,
     ExpandTargetCollection,
@@ -16,7 +15,6 @@ import { logger } from './logger';
 
 export type {
     SchemaDeclaration,
-    SubscribableCollection,
     CreateCollectionOptions,
     BaseRecord,
 } from './types';
@@ -50,6 +48,19 @@ type WithExpandFromConfig<
     : ExtractRecordType<Schema, C>;
 
 /**
+ * Subscription helpers added to collection instances.
+ * @internal
+ */
+interface CollectionSubscriptionHelpers {
+    /** The PocketBase collection name */
+    collectionName: string;
+    /** Wait for subscription to be established (useful in tests) */
+    waitForSubscription: (timeout?: number) => Promise<void>;
+    /** Check if collection has an active subscription */
+    isSubscribed: () => boolean;
+}
+
+/**
  * Inferred collection type from config options.
  * @internal
  */
@@ -60,42 +71,15 @@ type InferCollectionType<
 > = Collection<
     WithExpandFromConfig<Schema, C, Opts>,
     string | number,
-    // TUtils - use default from TanStack DB (includes writeBatch, writeUpsert, etc.)
-    Record<string, (...args: unknown[]) => unknown>,
+    // TUtils - QueryCollectionUtils from TanStack Query DB Collection
+    QueryCollectionUtils<WithExpandFromConfig<Schema, C, Opts>, string | number, WithExpandFromConfig<Schema, C, Opts>>,
     // TSchema - we don't use StandardSchema validation
     never,
     Opts extends { omitOnInsert: infer O extends readonly import('./types').OmittableFields<ExtractRecordType<Schema, C>>[] }
         ? import('./types').ComputeInsertType<ExtractRecordType<Schema, C>, O>
         : ExtractRecordType<Schema, C>
-> &
-   SubscribableCollection<WithExpandFromConfig<Schema, C, Opts>>;
+> & CollectionSubscriptionHelpers;
 
-/**
- * Two-level WeakMap to cache subscription managers per (PocketBase, QueryClient) pair.
- * This ensures collections created with the same PocketBase AND QueryClient share one manager,
- * while allowing different QueryClients (e.g., in tests) to have isolated managers.
- * @internal
- */
-const subscriptionManagerCache = new WeakMap<PocketBase, WeakMap<QueryClient, SubscriptionManager>>();
-
-/**
- * Gets or creates a subscription manager for a (PocketBase, QueryClient) pair.
- * @internal
- */
-function getSubscriptionManager(pb: PocketBase, queryClient: QueryClient): SubscriptionManager {
-    let queryClientMap = subscriptionManagerCache.get(pb);
-    if (!queryClientMap) {
-        queryClientMap = new WeakMap<QueryClient, SubscriptionManager>();
-        subscriptionManagerCache.set(pb, queryClientMap);
-    }
-
-    let manager = queryClientMap.get(queryClient);
-    if (!manager) {
-        manager = new SubscriptionManager(pb);
-        queryClientMap.set(queryClient, manager);
-    }
-    return manager;
-}
 
 /**
  * Creates a type-safe TanStack DB collection backed by PocketBase.
@@ -133,8 +117,6 @@ export function createCollection<Schema extends SchemaDeclaration>(
     pb: PocketBase,
     queryClient: QueryClient
 ) {
-    const subscriptionManager = getSubscriptionManager(pb, queryClient);
-
     return <
         C extends keyof Schema & string,
         Opts extends CreateCollectionOptions<Schema, C> = CreateCollectionOptions<Schema, C>
@@ -230,34 +212,123 @@ export function createCollection<Schema extends SchemaDeclaration>(
 
         const collection = createTanStackCollection(collectionOptions);
 
-        Object.assign(collection, {
-            collectionName,
-            subscribe: async (recordId?: string) => {
-                await subscriptionManager.subscribe(collectionName, collection, recordId);
-            },
-            unsubscribe: (recordId?: string) => {
-                subscriptionManager.unsubscribe(collectionName, recordId);
-            },
-            unsubscribeAll: () => {
-                subscriptionManager.unsubscribeAll(collectionName);
-            },
-            isSubscribed: (recordId?: string) => {
-                return subscriptionManager.isSubscribed(collectionName, recordId);
-            },
-            waitForSubscription: async (recordId?: string, timeoutMs?: number) => {
-                await subscriptionManager.waitForSubscription(collectionName, recordId, timeoutMs);
-            },
-        });
+        // Real-time subscription state
+        let unsubscribeFn: (() => Promise<void>) | null = null;
+        let isSubscribed = false;
+        let subscriptionPromise: Promise<void> | null = null;
+        let subscriptionResolve: (() => void) | null = null;
 
+        // Handle real-time events from PocketBase
+        const handleRealtimeEvent = (event: RecordSubscription<RecordType>) => {
+            if (!collection.utils) return;
+
+            collection.utils.writeBatch(() => {
+                switch (event.action) {
+                    case 'create':
+                        collection.utils.writeInsert(event.record);
+                        break;
+                    case 'update':
+                        collection.utils.writeUpdate(event.record);
+                        break;
+                    case 'delete':
+                        if (event.record && 'id' in event.record) {
+                            collection.utils.writeDelete((event.record as { id: string }).id);
+                        }
+                        break;
+                }
+            });
+        };
+
+        // Start PocketBase real-time subscription
+        const startSubscription = async () => {
+            if (isSubscribed) return;
+
+            // Create promise before starting so waiters can await it
+            if (!subscriptionPromise) {
+                subscriptionPromise = new Promise<void>((resolve) => {
+                    subscriptionResolve = resolve;
+                });
+            }
+
+            try {
+                unsubscribeFn = await pb.collection(collectionName).subscribe('*', handleRealtimeEvent);
+                isSubscribed = true;
+                logger.debug('Subscription started', { collectionName });
+                // Resolve the promise to notify waiters
+                if (subscriptionResolve) {
+                    subscriptionResolve();
+                }
+            } catch (error) {
+                logger.error('Failed to start subscription', { collectionName, error });
+            }
+        };
+
+        // Stop PocketBase real-time subscription
+        const stopSubscription = async () => {
+            if (!isSubscribed || !unsubscribeFn) return;
+
+            try {
+                await unsubscribeFn();
+                unsubscribeFn = null;
+                isSubscribed = false;
+                // Reset promise for next subscription cycle
+                subscriptionPromise = null;
+                subscriptionResolve = null;
+                logger.debug('Subscription stopped', { collectionName });
+            } catch (error) {
+                logger.debug('Unsubscribe failed (expected if connection closed)', { collectionName, error });
+            }
+        };
+
+        // Wait for subscription to be established (for testing)
+        const waitForSubscription = async (timeout = 5000): Promise<void> => {
+            if (isSubscribed) return;
+
+            if (!subscriptionPromise) {
+                // No subscription in progress, wait for one to start
+                await new Promise<void>((resolve) => {
+                    const checkInterval = setInterval(() => {
+                        if (subscriptionPromise) {
+                            clearInterval(checkInterval);
+                            resolve();
+                        }
+                    }, 10);
+                    setTimeout(() => {
+                        clearInterval(checkInterval);
+                        resolve();
+                    }, timeout);
+                });
+            }
+
+            if (subscriptionPromise) {
+                await Promise.race([
+                    subscriptionPromise,
+                    new Promise<void>((_, reject) =>
+                        setTimeout(() => reject(new Error('Subscription timeout')), timeout)
+                    )
+                ]);
+            }
+        };
+
+        // Manage subscription based on collection subscriber count
         collection.on('subscribers:change', (event: { subscriberCount: number; previousSubscriberCount: number }) => {
             const newCount = event.subscriberCount;
             const previousCount = event.previousSubscriberCount;
 
-            if (newCount > previousCount) {
-                subscriptionManager.addSubscriber(collectionName, collection).catch(() => {});
-            } else if (newCount < previousCount) {
-                subscriptionManager.removeSubscriber(collectionName);
+            if (newCount > 0 && previousCount === 0) {
+                // First subscriber - start real-time subscription
+                startSubscription().catch(() => {});
+            } else if (newCount === 0 && previousCount > 0) {
+                // Last subscriber removed - stop real-time subscription
+                stopSubscription().catch(() => {});
             }
+        });
+
+        // Add collectionName and subscription helpers
+        Object.assign(collection, {
+            collectionName,
+            waitForSubscription,
+            isSubscribed: () => isSubscribed,
         });
 
         return collection as any;

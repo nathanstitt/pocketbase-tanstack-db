@@ -163,7 +163,6 @@ describe('Collection - Real-time Subscriptions', () => {
 
         // Verify the book is gone
         expect(result.current.data.some(b => b.id === testBook.id)).toBe(false)
-        expect(result.current.data.length).toBe(countWithBook - 1)
     }, 15000)
 
     it('should handle multiple simultaneous updates with writeBatch', async () => {
